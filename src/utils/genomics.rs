@@ -3,8 +3,8 @@
 //! Genomics utility functions.
 //!
 //! This module provides utilities for:
-//! 1. Allele type classification (indel detection)
-//! 2. Calculate anchor length (shared prefix) between REF and ALT sequences in VCF variant representation;
+//! 1. Allele type classification (indel detection);
+//! 2. Anchor length calculation (shared prefix between sequences);
 //! 3.
 //! 4.
 //! 5. Sequence analysis (Svlen calculation);
@@ -135,6 +135,28 @@ pub fn classify_msi_status(msi_score: f64, threshold: f64) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    /* ========== is_indel tests =================== */
+
+    #[test]
+    fn test_is_indel_insertions() {
+        assert!(is_indel(b"A", b"ATT"));
+        assert!(is_indel(b"ACAG", b"ACAGCAG"));
+    }
+
+    #[test]
+    fn test_is_indel_deletions() {
+        assert!(is_indel(b"GCCT", b"G"));
+        assert!(is_indel(b"ATCG", b"A"));
+    }
+
+    #[test]
+    fn test_is_indel_not_indels() {
+        assert!(!is_indel(b"A", b"T"));             // SNV
+        assert!(!is_indel(b"ACG", b"TGC"));         // MNV
+        assert!(!is_indel(b"ACGT", b"ACGT"));       // Identical
+    }
 
     /* ====== calculate_anchor_length tests ========== */
 
