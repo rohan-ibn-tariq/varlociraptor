@@ -3,8 +3,43 @@
 //! Genomics utility functions.
 //!
 //! This module provides utilities for:
-//! 1. Sequence analysis (Svlen calculation);
-//! 2. MSI status classification.
+//! 1. Calculate anchor length (shared prefix) between REF and ALT sequences in VCF variant representation;
+//! 2.
+//! 3.
+//! 4. Sequence analysis (Svlen calculation);
+//! 5. MSI status classification.
+
+/// Calculate anchor length (shared prefix) between two sequences.
+///
+/// The anchor is the longest common prefix between REF and ALT alleles
+/// in VCF format. VCF indels always include at least one anchor base.
+///
+/// # Algorithm
+/// Compares sequences byte-by-byte (case-insensitive) until mismatch.
+///
+/// # Arguments
+/// * `ref_seq` - Reference allele sequence
+/// * `alt_seq` - Alternate allele sequence
+///
+/// # Returns
+/// Length of shared prefix in bytes
+///
+/// # Examples
+/// Deletion: GCCT -> G, anchor = G (1 base)
+/// assert_eq!(calculate_anchor_length(b"GCCT", b"G"), 1);
+///
+/// Insertion: G -> GCCT, anchor = G (1 base)
+/// assert_eq!(calculate_anchor_length(b"G", b"GCCT"), 1);
+///
+/// Two anchors: TGCCT -> TG, anchor = TG (2 bases)
+/// assert_eq!(calculate_anchor_length(b"TGCCT", b"TG"), 2);
+pub(crate) fn calculate_anchor_length(ref_seq: &[u8], alt_seq: &[u8]) -> usize {
+    let min_len = ref_seq.len().min(alt_seq.len());
+
+    (0..min_len)
+        .take_while(|&i| ref_seq[i].eq_ignore_ascii_case(&alt_seq[i]))
+        .count()
+}
 
 /// Calculate structural variant length (SVLEN) from reference and alternate sequences.
 ///
@@ -76,6 +111,44 @@ pub fn classify_msi_status(msi_score: f64, threshold: f64) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ====== calculate_anchor_length tests ========== */
+
+    #[test]
+    fn test_calculate_anchor_length_single() {
+        assert_eq!(calculate_anchor_length(b"GCCT", b"G"), 1);
+        assert_eq!(calculate_anchor_length(b"G", b"GCCT"), 1);
+    }
+
+    #[test]
+    fn test_calculate_anchor_length_multiple() {
+        assert_eq!(calculate_anchor_length(b"TGCCT", b"TG"), 2);
+        assert_eq!(calculate_anchor_length(b"ATGCCT", b"ATG"), 3);
+    }
+
+    #[test]
+    fn test_calculate_anchor_length_no_anchor() {
+        assert_eq!(calculate_anchor_length(b"A", b"T"), 0);
+        assert_eq!(calculate_anchor_length(b"AAA", b"TTT"), 0);
+    }
+
+    #[test]
+    fn test_calculate_anchor_length_complete_match() {
+        assert_eq!(calculate_anchor_length(b"ACGT", b"ACGT"), 4);
+    }
+
+    #[test]
+    fn test_calculate_anchor_length_case_insensitive() {
+        assert_eq!(calculate_anchor_length(b"AcGt", b"ACGT"), 4);
+        assert_eq!(calculate_anchor_length(b"gcct", b"GCCT"), 4);
+    }
+
+    #[test]
+    fn test_calculate_anchor_length_empty() {
+        assert_eq!(calculate_anchor_length(b"", b""), 0);
+        assert_eq!(calculate_anchor_length(b"ACGT", b""), 0);
+        assert_eq!(calculate_anchor_length(b"", b"ACGT"), 0);
+    }
 
     /* ======= calculate_dynamic_svlen tests ========= */
 
