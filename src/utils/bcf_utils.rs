@@ -18,7 +18,7 @@ use rust_htslib::bcf::header::{HeaderView, TagLength, TagType};
 use rust_htslib::bcf::{self, record::Numeric, Read};
 
 use crate::errors::Error;
-use crate::utils::genomics::calculate_dynamic_svlen;
+use crate::utils::genomics::{calculate_dynamic_svlen, is_indel};
 use crate::utils::is_phred_scaled;
 use crate::utils::stats::phred_to_prob;
 
@@ -329,21 +329,6 @@ pub(crate) fn get_sample_afs(
 /// assert!(is_reference_allele(b"."));
 pub(crate) fn is_reference_allele(allele: &[u8]) -> bool {
     allele == b"." || allele == b"<REF>"
-}
-
-/// Check if allele is an indel (different length than ref)
-///
-/// # Arguments
-/// * `ref_allele` - Reference allele sequence
-/// * `alt_allele` - Alternate allele sequence
-///
-/// # Returns
-/// `true` if allele is an indel, `false` otherwise
-///
-/// # Example
-/// assert!(is_indel(b"ACAG", b"ACAGCAG"));
-pub(crate) fn is_indel(ref_allele: &[u8], alt_allele: &[u8]) -> bool {
-    ref_allele.len() != alt_allele.len()
 }
 
 /// Check if allele is symbolic (starts with <)

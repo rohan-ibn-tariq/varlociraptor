@@ -3,11 +3,35 @@
 //! Genomics utility functions.
 //!
 //! This module provides utilities for:
-//! 1. Calculate anchor length (shared prefix) between REF and ALT sequences in VCF variant representation;
-//! 2.
+//! 1. Allele type classification (indel detection)
+//! 2. Calculate anchor length (shared prefix) between REF and ALT sequences in VCF variant representation;
 //! 3.
-//! 4. Sequence analysis (Svlen calculation);
-//! 5. MSI status classification.
+//! 4.
+//! 5. Sequence analysis (Svlen calculation);
+//! 6. MSI status classification.
+
+/// Check if two sequences represent an indel (different lengths).
+///
+/// An indel (insertion or deletion) is indicated by different
+/// sequence lengths between reference and alternate alleles.
+///
+/// # Arguments
+/// * `ref_seq` - Reference sequence
+/// * `alt_seq` - Alternate sequence
+///
+/// # Returns
+/// * `true` if lengths differ (indel)
+/// * `false` if same length (SNV, MNV, or identical)
+///
+/// # Example
+/// Insertion:
+/// assert!(is_indel(b"ACAG", b"ACAGCAG"));
+///
+/// SNV (not an indel):
+/// assert!(!is_indel(b"A", b"T"));
+pub(crate) fn is_indel(ref_seq: &[u8], alt_seq: &[u8]) -> bool {
+    ref_seq.len() != alt_seq.len()
+}
 
 /// Calculate anchor length (shared prefix) between two sequences.
 ///

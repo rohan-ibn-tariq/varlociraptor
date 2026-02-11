@@ -21,9 +21,10 @@ use rust_htslib::bcf::{self, header::HeaderView, Read};
 
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
-    get_chrom, get_prob_absent, get_sample_afs, get_svlen, is_breakend, is_indel,
-    is_reference_allele, is_spanning_deletion, is_symbolic,
+    get_chrom, get_prob_absent, get_sample_afs, get_svlen, is_breakend, is_reference_allele,
+    is_spanning_deletion, is_symbolic,
 };
+use crate::utils::genomics::is_indel;
 use crate::utils::ms_bed::{parse_bed_record, BedRegion};
 
 /* ============ Data Structures =================== */
