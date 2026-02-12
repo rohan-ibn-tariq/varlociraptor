@@ -5,7 +5,7 @@
 //! This module provides utilities for:
 //! 1. Allele type classification (indel detection);
 //! 2. Anchor length calculation (shared prefix between sequences);
-//! 3.
+//! 3. Clean indel detection (pure insertion/deletion without complex variants);
 //! 4.
 //! 5. Sequence analysis (Svlen calculation);
 //! 6. MSI status classification.
@@ -63,6 +63,54 @@ pub(crate) fn calculate_anchor_length(ref_seq: &[u8], alt_seq: &[u8]) -> usize {
     (0..min_len)
         .take_while(|&i| ref_seq[i].eq_ignore_ascii_case(&alt_seq[i]))
         .count()
+}
+
+/// Check if an indel is "clean" (pure insertion or deletion).
+///
+/// A clean indel must:
+/// 1. Be an actual indel (different lengths)
+/// 2. Have exactly ONE tail empty after removing anchor (XOR condition)
+///
+/// This rejects:
+/// - SNVs/MNVs (same length)
+/// - Complex variants (both REF and ALT have non-anchor sequence)
+///
+/// # Algorithm
+/// 1. Check if it's an indel (different lengths)
+/// 2. Find anchor (shared prefix)
+/// 3. Check exactly one tail is empty (XOR)
+///
+/// # Arguments
+/// * `ref_seq` - Reference sequence
+/// * `alt_seq` - Alternate sequence
+///
+/// # Returns
+/// * `true` if clean indel (one tail empty, lengths differ)
+/// * `false` if SNV, complex variant, or identical sequences
+///
+/// # Examples
+/// Clean deletion: GCCT -> G (anchor=G, ref_tail=CCT, alt_tail=empty)
+/// assert!(is_clean_indel(b"GCCT", b"G"));
+///
+/// Clean insertion: G -> GCCT (anchor=G, ref_tail=empty, alt_tail=CCT)
+/// assert!(is_clean_indel(b"G", b"GCCT"));
+///
+/// Complex: ATT -> AG (anchor=A, ref_tail=TT, alt_tail=G - BOTH non-empty)
+/// assert!(!is_clean_indel(b"ATT", b"AG"));
+///
+/// SNV: A -> T (same length, not an indel)
+/// assert!(!is_clean_indel(b"A", b"T"));
+pub(crate) fn is_clean_indel(ref_seq: &[u8], alt_seq: &[u8]) -> bool {
+    if !is_indel(ref_seq, alt_seq) {
+        return false;
+    }
+
+    let anchor_len = calculate_anchor_length(ref_seq, alt_seq);
+
+    let ref_tail = ref_seq.len() - anchor_len;
+    let alt_tail = alt_seq.len() - anchor_len;
+
+    (ref_tail == 0) != (alt_tail == 0)
 }
 
 /// Calculate structural variant length (SVLEN) from reference and alternate sequences.
@@ -136,7 +184,6 @@ pub fn classify_msi_status(msi_score: f64, threshold: f64) -> &'static str {
 mod tests {
     use super::*;
 
-
     /* ========== is_indel tests =================== */
 
     #[test]
@@ -153,9 +200,9 @@ mod tests {
 
     #[test]
     fn test_is_indel_not_indels() {
-        assert!(!is_indel(b"A", b"T"));             // SNV
-        assert!(!is_indel(b"ACG", b"TGC"));         // MNV
-        assert!(!is_indel(b"ACGT", b"ACGT"));       // Identical
+        assert!(!is_indel(b"A", b"T")); // SNV
+        assert!(!is_indel(b"ACG", b"TGC")); // MNV
+        assert!(!is_indel(b"ACGT", b"ACGT")); // Identical
     }
 
     /* ====== calculate_anchor_length tests ========== */
@@ -194,6 +241,44 @@ mod tests {
         assert_eq!(calculate_anchor_length(b"", b""), 0);
         assert_eq!(calculate_anchor_length(b"ACGT", b""), 0);
         assert_eq!(calculate_anchor_length(b"", b"ACGT"), 0);
+    }
+
+    /* ======== is_clean_indel tests ================= */
+
+    #[test]
+    fn test_is_clean_indel_clean_deletion() {
+        assert!(is_clean_indel(b"GCCT", b"G"));
+        assert!(is_clean_indel(b"ATCG", b"A"));
+    }
+
+    #[test]
+    fn test_is_clean_indel_clean_insertion() {
+        assert!(is_clean_indel(b"G", b"GCCT"));
+        assert!(is_clean_indel(b"A", b"ATCG"));
+    }
+
+    #[test]
+    fn test_is_clean_indel_complex_variants() {
+        // Both have tails - complex variant
+        assert!(!is_clean_indel(b"ATT", b"AG"));
+        assert!(!is_clean_indel(b"AAAGAGAGAGA", b"AAAT"));
+    }
+
+    #[test]
+    fn test_is_clean_indel_same_sequence() {
+        // SNV (same length) - rejected by first check
+        assert!(!is_clean_indel(b"A", b"T"));
+        assert!(!is_clean_indel(b"ACGT", b"ACGT"));
+    }
+
+    #[test]
+    fn test_is_clean_indel_edge_cases() {
+        // Empty sequences
+        assert!(!is_clean_indel(b"", b""));
+
+        // One empty (clean insertion/deletion from nothing)
+        assert!(is_clean_indel(b"", b"ACGT"));
+        assert!(is_clean_indel(b"ACGT", b""));
     }
 
     /* ======= calculate_dynamic_svlen tests ========= */
