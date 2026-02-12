@@ -197,10 +197,7 @@ pub(crate) fn calculate_indel_position(pos: u64, ref_seq: &[u8], alt_seq: &[u8])
 /// assert_eq!(calculate_dynamic_svlen(b"ACAGT", b"AC"), -3);
 pub(crate) fn calculate_dynamic_svlen(ref_seq: &[u8], alt_seq: &[u8]) -> i32 {
     // Find anchor length (longest common prefix)
-    let min_len = ref_seq.len().min(alt_seq.len());
-    let anchor_len = (0..min_len)
-        .take_while(|&i| ref_seq[i].eq_ignore_ascii_case(&alt_seq[i]))
-        .count();
+    let anchor_len = calculate_anchor_length(ref_seq, alt_seq);
 
     // Calculate length difference after anchor
     let ref_tail = ref_seq.len() - anchor_len;
