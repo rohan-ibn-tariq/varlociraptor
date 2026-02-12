@@ -6,7 +6,7 @@
 //! 1. Allele type classification (indel detection);
 //! 2. Anchor length calculation (shared prefix between sequences);
 //! 3. Clean indel detection (pure insertion/deletion without complex variants);
-//! 4.
+//! 4. Indel position calculation (adjusting for anchor to find true indel location);
 //! 5. Sequence analysis (Svlen calculation);
 //! 6. MSI status classification.
 
@@ -111,6 +111,59 @@ pub(crate) fn is_clean_indel(ref_seq: &[u8], alt_seq: &[u8]) -> bool {
     let alt_tail = alt_seq.len() - anchor_len;
 
     (ref_tail == 0) != (alt_tail == 0)
+}
+
+/// Calculate the genomic position where an indel actually occurs.
+///
+/// In variant representation (VCF, etc.), the position field often points to
+/// anchor base(s), not where the insertion/deletion actually happens. This
+/// function calculates the position where the sequence change begins.
+///
+/// Returns None if the variant is not a clean indel (complex variant or SNV).
+///
+/// # Coordinate System
+/// **This function is coordinate-system agnostic:**
+/// - Input 0-based position: Output 0-based position
+/// - Input 1-based position: Output 1-based position
+/// - The function preserves whatever coordinate system you provide
+///
+/// # Algorithm
+/// 1. Validate it's a clean indel (one tail empty)
+/// 2. Find anchor length (shared prefix)
+/// 3. Add anchor length to input position
+///
+/// # Arguments
+/// * `pos` - Genomic position (in ANY coordinate system)
+/// * `ref_seq` - Reference sequence
+/// * `alt_seq` - Alternate sequence
+///
+/// # Returns
+/// * `Some(position)` - Position where clean indel starts (same coordinate system as input)
+/// * `None` - Not a clean indel (complex variant, SNV, or identical sequences)
+///
+/// # Examples
+/// 0-based coordinates (BED):
+/// Position 18630802 (0-based) with anchor G
+/// Indel starts at: 18630802 + 1 = 18630803 (0-based)
+/// assert_eq!(calculate_indel_position(18630802, b"GCCT", b"G"), Some(18630803));
+///
+/// 1-based coordinates (VCF standard):
+/// Position 18630803 (1-based) with anchor G
+/// Indel starts at: 18630803 + 1 = 18630804 (1-based)
+/// assert_eq!(calculate_indel_position(18630803, b"GCCT", b"G"), Some(18630804));
+///
+/// Complex variant: returns None
+/// assert_eq!(calculate_indel_position(100, b"ATT", b"AG"), None);
+///
+/// SNV: returns None
+/// assert_eq!(calculate_indel_position(100, b"A", b"T"), None);
+pub(crate) fn calculate_indel_position(pos: u64, ref_seq: &[u8], alt_seq: &[u8]) -> Option<u64> {
+    if !is_clean_indel(ref_seq, alt_seq) {
+        return None;
+    }
+
+    let anchor_len = calculate_anchor_length(ref_seq, alt_seq);
+    Some(pos + anchor_len as u64)
 }
 
 /// Calculate structural variant length (SVLEN) from reference and alternate sequences.
@@ -279,6 +332,62 @@ mod tests {
         // One empty (clean insertion/deletion from nothing)
         assert!(is_clean_indel(b"", b"ACGT"));
         assert!(is_clean_indel(b"ACGT", b""));
+    }
+
+    /* ==== calculate_indel_position tests =========== */
+
+    #[test]
+    fn test_calculate_indel_position_clean_deletion_0based() {
+        assert_eq!(
+            calculate_indel_position(18630802, b"GCCT", b"G"),
+            Some(18630803)
+        );
+    }
+
+    #[test]
+    fn test_calculate_indel_position_clean_deletion_1based() {
+        assert_eq!(
+            calculate_indel_position(18630803, b"GCCT", b"G"),
+            Some(18630804)
+        );
+    }
+
+    #[test]
+    fn test_calculate_indel_position_clean_insertion() {
+        assert_eq!(calculate_indel_position(100, b"A", b"ATT"), Some(101));
+    }
+
+    #[test]
+    fn test_calculate_indel_position_multiple_anchors() {
+        assert_eq!(calculate_indel_position(200, b"TGCCT", b"TG"), Some(202));
+    }
+
+    #[test]
+    fn test_calculate_indel_position_complex_variant_or_snv() {
+        assert_eq!(calculate_indel_position(100, b"ATT", b"AG"), None);
+        assert_eq!(calculate_indel_position(100, b"AAAGAGAGAGA", b"AAAT"), None);
+        assert_eq!(calculate_indel_position(300, b"A", b"T"), None);
+    }
+
+    #[test]
+    fn test_calculate_indel_position_no_anchor() {
+        assert_eq!(calculate_indel_position(100, b"A", b"TGC"), None);
+    }
+
+    #[test]
+    fn test_calculate_indel_position_chromosome_start() {
+        // Edge case: Position 0 (0-based) = first chromosome base
+
+        // Insertion at start
+        assert_eq!(calculate_indel_position(0, b"A", b"ATT"), Some(1));
+
+        // Deletion at start
+        assert_eq!(calculate_indel_position(0, b"ACGT", b"A"), Some(1));
+    }
+
+    #[test]
+    fn test_calculate_indel_position_no_empty_ref_seq() {
+        assert_eq!(calculate_indel_position(100, b"", b"TGC"), Some(100));
     }
 
     /* ======= calculate_dynamic_svlen tests ========= */
