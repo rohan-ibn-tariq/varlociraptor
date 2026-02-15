@@ -287,8 +287,8 @@ fn analyze_variant(
 ///    - Returns Some(pos) if clean indel
 /// 4. Check if indel position is within BED region [start, end)
 ///
-/// # Note: We perform point-based overlap, which means
-///         we only consider the variant position.
+/// # Note:
+/// We perform point-based overlap, which means we only consider the variant position.
 ///
 /// # Arguments
 /// * `record` - BCF record representing the variant
