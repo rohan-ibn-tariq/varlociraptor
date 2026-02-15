@@ -24,7 +24,9 @@ use crate::utils::bcf_utils::{
     get_chrom, get_prob_absent, get_sample_afs, get_svlen, is_breakend, is_reference_allele,
     is_spanning_deletion, is_symbolic,
 };
-use crate::utils::genomics::is_indel;
+use crate::utils::genomics::{
+    calculate_anchor_length, calculate_indel_position, is_clean_indel, is_indel,
+};
 use crate::utils::ms_bed::{parse_bed_record, BedRegion};
 
 /* ============ Data Structures =================== */
@@ -131,29 +133,15 @@ fn is_perfect_repeat(alt_seq: &[u8], svlen: i32, motif: &str, ref_seq: &[u8]) ->
         return RepeatStatus::NA;
     }
 
-    // 1. Finding the anchor
-    // Note: Anchor length 0 is not errored as a valid indel
-    let abs_svlen = svlen.unsigned_abs() as usize;
-    let mut anchor_len = 0;
-    let min_len = ref_seq.len().min(alt_seq.len());
-
-    for i in 0..min_len {
-        if ref_seq[i].eq_ignore_ascii_case(&alt_seq[i]) {
-            anchor_len += 1;
-        } else {
-            break;
-        }
-    }
-
-    // 2. Making sure is a clean indel, ignoring complex indels
-    let ref_tail = ref_seq.len() - anchor_len;
-    let alt_tail = alt_seq.len() - anchor_len;
-
-    // Require a clean indel: one tail must be empty
-    // This rejects complex variants like AAT -> AAGAGAGAGA
-    if ref_tail != 0 && alt_tail != 0 {
+    // 1. Use genomics utility to check if clean indel
+    if !is_clean_indel(ref_seq, alt_seq) {
         return RepeatStatus::NA;
     }
+
+    // 2. Finding the anchor length and absolute SVLEN
+    // Note: Anchor length 0 is not errored as a valid indel
+    let abs_svlen = svlen.unsigned_abs() as usize;
+    let anchor_len = calculate_anchor_length(ref_seq, alt_seq);
 
     // 3. Extracting the changed sequence
     let changed_seq = if svlen > 0 {
@@ -285,26 +273,50 @@ fn analyze_variant(
 
 /* ============ Streaming Intersection ============ */
 
-/// Check if a variant position is within a BED region
-/// Uses point-based overlap (variant position only)
+/// Check if a variant's indel overlaps with a BED region.
+///
+/// Accounts for VCF anchor bases by calculating where the indel actually
+/// occurs (after the anchor), then checking if that position falls within
+/// the pure repeat region. Also filters out complex variants and SNVs.
+///
+/// # Algorithm
+/// 1. Get VCF position (0-based, points to anchor base)
+/// 2. Extract REF and ALT alleles for this specific alt_idx
+/// 3. Calculate actual indel position using genomics::calculate_indel_position
+///    - Returns None if: complex variant (both tails non-empty), SNV, or identical sequences
+///    - Returns Some(pos) if clean indel
+/// 4. Check if indel position is within BED region [start, end)
+///
+/// # Note: We perform point-based overlap, which means
+///         we only consider the variant position.
 ///
 /// # Arguments
 /// * `record` - BCF record representing the variant
 /// * `region` - BED region to check overlap against
+/// * `alt_idx` - Index of the alternate allele to analyze (0-based into ALT array)
 ///
 /// # Returns
-/// * `true` if variant position is within region, else `false`
-///
-/// # Note: Point-based overlap means we only consider the variant position,
+/// * `true` if clean indel position is within region
+/// * `false` if complex variant, SNV, or outside region
 ///
 /// # Example
-/// assert!(variant_overlaps_region(&record, &region));
+/// VCF: POS=18630802 (0-based), REF=GCCT, ALT=G
+/// Anchor = G (1 base)
+/// Indel position = 18630802 + 1 = 18630803
+/// Region: [18630803, 18630833) (pure CCT repeat)
+/// Result: 18630803 >= 18630803 && 18630803 < 18630833 , TRUE
 #[inline]
-fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion) -> bool {
-    // Variant position (0-based)
-    let pos = record.pos() as u64;
-    // BED region (0-based, half-open [start, end))
-    pos >= region.start && pos < region.end
+fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: usize) -> bool {
+    let vcf_pos = record.pos() as u64;
+    let alleles = record.alleles();
+    let ref_allele = alleles[0];
+    let alt_allele = alleles[alt_idx + 1]; // +1 because alleles[0] is REF
+
+    // Calculate where the indel occurs (None if complex variant/SNV)
+    match calculate_indel_position(vcf_pos, ref_allele, alt_allele) {
+        Some(indel_pos) => indel_pos >= region.start && indel_pos < region.end,
+        None => false,
+    }
 }
 
 /// Perform streaming intersection of BED regions with VCF variants.
@@ -391,7 +403,18 @@ pub(super) fn intersect_streaming(
                 variant_window.pop_front();
             } else if chrom == &region.chrom {
                 let pos = record.pos() as u64;
-                if pos < region.start {
+                let alleles = record.alleles();
+                let ref_allele = alleles[0];
+
+                let max_indel_pos = (1..alleles.len())
+                    .filter_map(|alt_idx| {
+                        let alt_allele = alleles[alt_idx];
+                        calculate_indel_position(pos, ref_allele, alt_allele)
+                    })
+                    .max()
+                    .unwrap_or(pos);
+
+                if max_indel_pos < region.start {
                     variant_window.pop_front();
                 } else {
                     break;
@@ -411,7 +434,18 @@ pub(super) fn intersect_streaming(
                     break;
                 } else if chrom == &region.chrom {
                     let pos = record.pos() as u64;
-                    if pos >= region.end {
+                    let alleles = record.alleles();
+                    let ref_allele = alleles[0];
+
+                    let min_indel_pos = (1..alleles.len())
+                        .filter_map(|alt_idx| {
+                            let alt_allele = alleles[alt_idx];
+                            calculate_indel_position(pos, ref_allele, alt_allele)
+                        })
+                        .min()
+                        .unwrap_or(pos);
+
+                    if min_indel_pos >= region.end {
                         break;
                     }
                 }
@@ -459,27 +493,29 @@ pub(super) fn intersect_streaming(
                 seen_any_chrom_overlap = true;
             }
 
-            if variant_overlaps_region(record, &region) {
-                // Analyze each alt allele
-                let allele_count = record.allele_count() as usize;
-                for alt_idx in 0..(allele_count - 1) {
-                    match analyze_variant(
-                        record,
-                        &header,
-                        alt_idx,
-                        &region,
-                        samples_index_map,
-                        is_phred,
-                    )? {
-                        Some(analysis) => {
-                            let summary = region_summary.get_or_insert_with(|| RegionSummary {
-                                variants: Vec::new(),
-                            });
-                            summary.add_variant(analysis);
-                        }
-                        None => {
-                            // Filtered
-                        }
+            let allele_count = record.allele_count() as usize;
+            for alt_idx in 0..(allele_count - 1) {
+                // Check overlap for THIS specific ALT allele
+                if !variant_overlaps_region(record, &region, alt_idx) {
+                    continue;
+                }
+
+                match analyze_variant(
+                    record,
+                    &header,
+                    alt_idx,
+                    &region,
+                    samples_index_map,
+                    is_phred,
+                )? {
+                    Some(analysis) => {
+                        let summary = region_summary.get_or_insert_with(|| RegionSummary {
+                            variants: Vec::new(),
+                        });
+                        summary.add_variant(analysis);
+                    }
+                    None => {
+                        // Filtered
                     }
                 }
             }
@@ -833,53 +869,183 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig::default());
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"AT"],
+            ..Default::default()
+        });
         let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let record = reader.records().next().unwrap().unwrap();
 
-        // Inside
-        assert!(variant_overlaps_region(
-            &record,
-            &BedRegion {
-                chrom: "chr1".to_string(),
-                start: 0,
-                end: 200,
-                motif: "A".to_string(),
-            }
-        ));
+        // VCF POS=99 (0-based), REF=A, ALT=AT
+        // Anchor = A (1 base)
+        // Indel position = 99 + 1 = 100
 
-        // At start (inclusive)
+        // At start (inclusive) - region [100, 200), indel at 100
         assert!(variant_overlaps_region(
-            &record,
-            &BedRegion {
-                chrom: "chr1".to_string(),
-                start: 99,
-                end: 200,
-                motif: "A".to_string(),
-            }
-        ));
-
-        // Before region
-        assert!(!variant_overlaps_region(
             &record,
             &BedRegion {
                 chrom: "chr1".to_string(),
                 start: 100,
                 end: 200,
-                motif: "A".to_string(),
-            }
+                motif: "T".to_string(),
+            },
+            0
         ));
 
-        // At end (exclusive)
+        // Before region - region [101, 200), indel at 100
         assert!(!variant_overlaps_region(
             &record,
             &BedRegion {
                 chrom: "chr1".to_string(),
-                start: 0,
-                end: 99,
-                motif: "A".to_string(),
-            }
+                start: 101,
+                end: 200,
+                motif: "T".to_string(),
+            },
+            0
         ));
+
+        // At end (exclusive) - region [99, 100), indel at 100
+        assert!(!variant_overlaps_region(
+            &record,
+            &BedRegion {
+                chrom: "chr1".to_string(),
+                start: 99,
+                end: 100,
+                motif: "T".to_string(),
+            },
+            0
+        ));
+    }
+
+    #[test]
+    fn test_variant_overlaps_region_multiple_anchors() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"TGCCT",
+            alt_alleles: vec![b"TG"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+
+        // VCF POS=99, REF=TGCCT, ALT=TG
+        // Anchor = TG (2 bases)
+        // Indel position = 99 + 2 = 101
+
+        // Region [101, 105): indel at 101: INSIDE
+        assert!(variant_overlaps_region(
+            &record,
+            &BedRegion {
+                chrom: "chr1".to_string(),
+                start: 101,
+                end: 105,
+                motif: "CCT".to_string(),
+            },
+            0
+        ));
+
+        // Region [102, 105): indel at 101: OUTSIDE
+        assert!(!variant_overlaps_region(
+            &record,
+            &BedRegion {
+                chrom: "chr1".to_string(),
+                start: 102,
+                end: 105,
+                motif: "CCT".to_string(),
+            },
+            0
+        ));
+    }
+
+    #[test]
+    fn test_variant_overlaps_region_complex_variant_tails_non_empty() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ATT",
+            alt_alleles: vec![b"AG"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+
+        // Complex variant returns None: should NOT overlap
+        assert!(!variant_overlaps_region(
+            &record,
+            &BedRegion {
+                chrom: "chr1".to_string(),
+                start: 99,
+                end: 200,
+                motif: "T".to_string(),
+            },
+            0
+        ));
+    }
+
+    #[test]
+    fn test_variant_overlaps_region_snv() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"T"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+
+        // SNV returns None: should NOT overlap
+        assert!(!variant_overlaps_region(
+            &record,
+            &BedRegion {
+                chrom: "chr1".to_string(),
+                start: 99,
+                end: 100,
+                motif: "A".to_string(),
+            },
+            0
+        ));
+    }
+
+    #[test]
+    fn test_variant_overlaps_region_multi_alt() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"GCCT",
+            alt_alleles: vec![b"G", b"GCCTCCT"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+
+        // VCF POS=99
+        // ALT1: GCCT -> G, anchor=1, indel_pos=100
+        // ALT2: GCCT -> GCCTCCT, anchor=4, indel_pos=103
+
+        let region1 = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 100,
+            end: 102,
+            motif: "CCT".to_string(),
+        };
+
+        let region2 = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 103,
+            end: 110,
+            motif: "CCT".to_string(),
+        };
+
+        // ALT1 overlaps region1 (indel at 100)
+        assert!(variant_overlaps_region(&record, &region1, 0));
+
+        // ALT1 does NOT overlap region2
+        assert!(!variant_overlaps_region(&record, &region2, 0));
+
+        // ALT2 does NOT overlap region1
+        assert!(!variant_overlaps_region(&record, &region1, 1));
+
+        // ALT2 overlaps region2 (indel at 103)
+        assert!(variant_overlaps_region(&record, &region2, 1));
     }
 
     /* ========== intersect_streaming tests ========== */
