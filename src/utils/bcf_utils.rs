@@ -18,7 +18,7 @@ use rust_htslib::bcf::header::{HeaderView, TagLength, TagType};
 use rust_htslib::bcf::{self, record::Numeric, Read};
 
 use crate::errors::Error;
-use crate::utils::genomics::{calculate_dynamic_svlen, is_indel};
+use crate::utils::genomics::calculate_dynamic_svlen;
 use crate::utils::is_phred_scaled;
 use crate::utils::stats::phred_to_prob;
 
@@ -212,18 +212,29 @@ pub(crate) fn get_prob_absent(
 
     let probability = probability_absent + probability_artifact;
 
+    // Optional: Adjust with gnomAD population frequency
+    let gnomad_af = match record.info(b"POPULATION_AF").float() {
+        Ok(Some(p)) if alt_idx < p.len() && !p[alt_idx].is_missing() => p[alt_idx] as f64,
+        Ok(Some(_)) | Ok(None) | Err(_) => 0.0, // Missing/invalid: use 0.0
+    };
+
+    // Efficient calculation:
+    // prob_absent_final = 1 - ((1 - prob_absent_base) × (1 - gnomad_af))
+    // Expanded: prob_absent_base + gnomad_af × (1 - prob_absent_base)
+    let probability_final = probability + gnomad_af * (1.0 - probability);
+
     let valid_range = -EPSILON..=1.0 + EPSILON;
-    if !valid_range.contains(&probability) {
+    if !valid_range.contains(&probability_final) {
         return Err(Error::VcfProbabilityValueInvalid {
-            field: "DERIVED PROBABILITY ABSENT: PROB_ABSENT + PROB_ARTIFACT".to_string(),
-            value: probability as f32,
+            field: "ADJUSTED PROBABILITY ABSENT (with gnomAD)".to_string(),
+            value: probability_final as f32,
             chrom: get_chrom(record, header)?,
             pos: record.pos() + 1,
         }
         .into());
     }
 
-    let probability = probability.clamp(0.0, 1.0);
+    let probability = probability_final.clamp(0.0, 1.0);
 
     Ok(Some(probability))
 }
@@ -575,6 +586,7 @@ pub(crate) mod tests {
     use rust_htslib::bcf::record::Numeric;
     use tempfile::NamedTempFile;
 
+    use crate::utils::genomics::is_indel;
     use crate::utils::stats::TEST_EPSILON;
 
     /// Encodes a single allele for the GT field in BCF format.
