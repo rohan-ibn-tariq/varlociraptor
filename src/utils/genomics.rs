@@ -222,7 +222,7 @@ pub(crate) fn calculate_dynamic_svlen(ref_seq: &[u8], alt_seq: &[u8]) -> i32 {
 ///
 /// # Examples
 /// assert_eq!(classify_msi_status(5.0, 3.5), "MSI-High");
-pub fn classify_msi_status(msi_score: f64, threshold: f64) -> &'static str {
+pub(crate) fn classify_msi_status(msi_score: f64, threshold: f64) -> &'static str {
     if msi_score >= threshold {
         "MSI-High"
     } else {
