@@ -1069,8 +1069,8 @@ mod tests {
         samples_index_map.insert("sample2".to_string(), 1);
 
         let (results, total_regions) = intersect_streaming(
-            &tmp_bed.path().to_path_buf(),
-            &tmp_vcf.path().to_path_buf(),
+            tmp_bed.path(),
+            tmp_vcf.path(),
             &samples_index_map,
             false,
         )
@@ -1095,8 +1095,8 @@ mod tests {
         samples_index_map.insert("sample1".to_string(), 0);
 
         let (results, total_regions) = intersect_streaming(
-            &tmp_bed.path().to_path_buf(),
-            &tmp_vcf.path().to_path_buf(),
+            tmp_bed.path(),
+            tmp_vcf.path(),
             &samples_index_map,
             false,
         )
@@ -1115,8 +1115,8 @@ mod tests {
         samples_index_map.insert("sample1".to_string(), 0);
 
         let (results, total_regions) = intersect_streaming(
-            &tmp_bed.path().to_path_buf(),
-            &tmp_vcf.path().to_path_buf(),
+            tmp_bed.path(),
+            tmp_vcf.path(),
             &samples_index_map,
             false,
         )
