@@ -10,7 +10,7 @@
 //! 5. VCF file validation
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
@@ -491,7 +491,7 @@ pub(crate) fn validate_required_vcf_fields_msi(header: &HeaderView) -> Result<()
 /// # Example
 /// assert!(validate_vcf_file(&vcf_path, &vec!["sample1".to_string()]).is_ok());
 pub(crate) fn validate_vcf_file(
-    vcf_path: &PathBuf,
+    vcf_path: &Path,
     samples_exclusion: &[String],
 ) -> Result<(SampleInfo, bool)> {
     info!("Validating VCF file format: {}", vcf_path.display());

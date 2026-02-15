@@ -12,7 +12,7 @@
 //! large datasets.
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use bio::io::bed;
@@ -358,8 +358,8 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// # Example
 /// assert!(intersect_streaming(&bed_path, &vcf_path, &samples_index_map).is_ok());
 pub(super) fn intersect_streaming(
-    bed_path: &PathBuf,
-    vcf_path: &PathBuf,
+    bed_path: &Path,
+    vcf_path: &Path,
     samples_index_map: &HashMap<String, usize>,
     is_phred: bool,
 ) -> Result<(Vec<RegionSummary>, usize)> {
