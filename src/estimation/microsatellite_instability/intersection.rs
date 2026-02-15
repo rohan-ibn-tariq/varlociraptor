@@ -165,7 +165,7 @@ fn is_perfect_repeat(alt_seq: &[u8], svlen: i32, motif: &str, ref_seq: &[u8]) ->
     let motif_bytes: Vec<u8> = motif.bytes().map(|b| b.to_ascii_uppercase()).collect();
     let motif_len = motif_bytes.len();
 
-    /* NOTE: In case we toggle the Error on motif.len() in bed parsing off, turn this onn.*/
+    /* NOTE: In case we toggle the Error on motif.len() in bed parsing off, turn this on.*/
     // if motif_len == 0 {
     //     return RepeatStatus::NA
     // }
