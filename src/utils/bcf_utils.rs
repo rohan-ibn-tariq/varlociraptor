@@ -993,8 +993,7 @@ pub(crate) mod tests {
         });
 
         // Test with no exclusions
-        let (samples_info, is_phred) =
-            validate_vcf_file(tmp_vcf.path(), &[]).unwrap();
+        let (samples_info, is_phred) = validate_vcf_file(tmp_vcf.path(), &[]).unwrap();
         assert_eq!(samples_info.samples.len(), 2);
         assert_eq!(samples_info.samples_index_map["sample1"], 0);
         assert_eq!(samples_info.samples_index_map["sample2"], 1);
@@ -1007,11 +1006,7 @@ pub(crate) mod tests {
         assert!(!is_phred);
 
         // Test exclusion of non-existent sample
-        let err = validate_vcf_file(
-            tmp_vcf.path(),
-            &["invalid_sample".to_string()],
-        )
-        .unwrap_err();
+        let err = validate_vcf_file(tmp_vcf.path(), &["invalid_sample".to_string()]).unwrap_err();
         assert!(format!("{err:?}").contains("invalid_sample"));
     }
 
@@ -1023,8 +1018,7 @@ pub(crate) mod tests {
             ..Default::default()
         });
 
-        let (sample_info, is_phred) =
-            validate_vcf_file(tmp_vcf.path(), &[]).unwrap();
+        let (sample_info, is_phred) = validate_vcf_file(tmp_vcf.path(), &[]).unwrap();
 
         assert_eq!(sample_info.samples.len(), 2);
         assert!(is_phred, "Should detect PHRED-scaled probabilities");

@@ -1068,13 +1068,8 @@ mod tests {
         samples_index_map.insert("sample1".to_string(), 0);
         samples_index_map.insert("sample2".to_string(), 1);
 
-        let (results, total_regions) = intersect_streaming(
-            tmp_bed.path(),
-            tmp_vcf.path(),
-            &samples_index_map,
-            false,
-        )
-        .unwrap();
+        let (results, total_regions) =
+            intersect_streaming(tmp_bed.path(), tmp_vcf.path(), &samples_index_map, false).unwrap();
 
         assert_eq!(total_regions, 1);
         assert_eq!(results.len(), 1);
@@ -1094,13 +1089,8 @@ mod tests {
         let mut samples_index_map = HashMap::new();
         samples_index_map.insert("sample1".to_string(), 0);
 
-        let (results, total_regions) = intersect_streaming(
-            tmp_bed.path(),
-            tmp_vcf.path(),
-            &samples_index_map,
-            false,
-        )
-        .unwrap();
+        let (results, total_regions) =
+            intersect_streaming(tmp_bed.path(), tmp_vcf.path(), &samples_index_map, false).unwrap();
 
         assert_eq!(total_regions, 1);
         assert_eq!(results.len(), 0);
@@ -1114,13 +1104,8 @@ mod tests {
         let mut samples_index_map = HashMap::new();
         samples_index_map.insert("sample1".to_string(), 0);
 
-        let (results, total_regions) = intersect_streaming(
-            tmp_bed.path(),
-            tmp_vcf.path(),
-            &samples_index_map,
-            false,
-        )
-        .unwrap();
+        let (results, total_regions) =
+            intersect_streaming(tmp_bed.path(), tmp_vcf.path(), &samples_index_map, false).unwrap();
 
         assert_eq!(total_regions, 4);
         assert!(results.len() == 4);
