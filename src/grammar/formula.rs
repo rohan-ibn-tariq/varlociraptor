@@ -454,17 +454,17 @@ impl Formula {
 
     fn sort(&mut self) {
         match self {
-            Formula::Conjunction { operands } => {
+            Formula::Conjunction { operands } | Formula::Disjunction { operands } => {
                 for operand in operands.iter_mut() {
                     operand.sort();
                 }
-                operands.sort()
-            }
-            Formula::Disjunction { operands } => {
-                for operand in operands.iter_mut() {
-                    operand.sort();
-                }
-                operands.sort()
+                operands.sort();
+
+                operands.sort_by_key(|f| match f {
+                    Formula::Terminal(FormulaTerminal::Log2FoldChange { .. }) => 0,
+
+                    _ => 1,
+                });
             }
             _ => (),
         }
@@ -1110,18 +1110,18 @@ impl VAFRange {
         );
         let left = VAFRange {
             inner: self.start..vaf,
-            left_exclusive: self.left_exclusive,
+            left_exclusive: self.left_exclusive || self.start == vaf,
             right_exclusive: true,
         };
         let right = VAFRange {
             inner: vaf..self.end,
             left_exclusive: true,
-            right_exclusive: self.right_exclusive,
+            right_exclusive: self.right_exclusive || self.end == vaf,
         };
 
         let to_spectrum = |range: VAFRange| {
             if range.start == range.end {
-                if !(range.left_exclusive && self.right_exclusive) {
+                if !(range.left_exclusive && range.right_exclusive) {
                     Some(VAFSpectrum::singleton(range.start))
                 } else {
                     None
