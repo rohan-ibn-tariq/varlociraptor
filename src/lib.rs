@@ -40,6 +40,7 @@ pub(crate) mod errors;
 pub(crate) mod estimation;
 pub mod filtration;
 pub(crate) mod grammar;
+pub(crate) mod preprocessing;
 pub(crate) mod reference;
 pub mod testcase;
 pub mod utils;
