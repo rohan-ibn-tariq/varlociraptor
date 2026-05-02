@@ -1,13 +1,13 @@
 //! constants.rs
-//! 
+//!
 //! This module defines global constants used across varlociraptor.
 //! Centralizing constants here promotes maintainability and consistency across the codebase.
-//! 
+//!
 //! Note: Constants should be defined under proper sections (e.g. MSI: CONSTANTS) with clear documentation on their purpose and usage.
-//! 
+//!
 //! Sections of Constants included are:
 //! 1. MSI: Constants - Microsatellite Instability related constants.
-//! 
+//!
 
 /* =============== MSI: CONSTANTS ================== */
 
