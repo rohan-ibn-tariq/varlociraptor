@@ -23,4 +23,7 @@ pub const DEFAULT_MSI_THRESHOLD: &str = "3.5";
 /// are not meaningful for MSI classification.
 pub const MIN_MSI_THRESHOLD: f64 = 0.0;
 
+/// Sliding window size (bp) for regional MSI heatmap analysis.
+pub const DEFAULT_SLIDING_WINDOW_SIZE: u64 = 1_000_000;
+
 /* ================================================ */
