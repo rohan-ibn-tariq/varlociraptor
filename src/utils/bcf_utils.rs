@@ -314,6 +314,30 @@ pub(crate) fn get_sample_afs(
 
 /* ================================================ */
 
+/* ===== BCF Specification Check Functions ======== */
+
+/// Check if VCF uses PHRED-scaled probabilities from file path.
+///
+/// Opens the VCF file and checks the description of PROB_{event}s
+/// to determine if probabilities are PHRED-scaled or linear.
+///
+/// # Arguments
+/// * `vcf_path` - Path to VCF/BCF file
+///
+/// # Returns
+/// * `Ok(true)` if probabilities are PHRED-scaled
+/// * `Ok(false)` if probabilities are linear
+/// * `Err` if file cannot be opened
+///
+/// # Example
+/// assert!(is_phred_scaled_from_path(Path::new("variants.vcf")).is_ok());
+pub(crate) fn is_phred_scaled_from_path(vcf_path: &Path) -> Result<bool> {
+    let vcf = bcf::Reader::from_path(vcf_path)?;
+    Ok(is_phred_scaled(&vcf))
+}
+
+/* ================================================ */
+
 /* ======== BCF Allele Type Check Functions ======= */
 
 // /// Check if all alleles are SNVs (all same length as ref)
@@ -640,13 +664,15 @@ pub(crate) mod tests {
         header.push_record(br"##contig=<ID=chr1,length=1000000>");
         header.push_record(br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##);
 
-        // Conditionally set PROB_ABSENT and PROB_ARTIFACT headers based on use_phred
+        // Conditionally set PROB_ABSENT, PROB_ARTIFACT and PROB_SOMATIC headers based on use_phred
         if config.use_phred {
             header.push_record(br##"##INFO=<ID=PROB_ABSENT,Number=A,Type=Float,Description="Probability absent (PHRED)">"##);
             header.push_record(br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Probability artifact (PHRED)">"##);
+            header.push_record(br##"##INFO=<ID=PROB_SOMATIC,Number=A,Type=Float,Description="Probability somatic (PHRED)">"##);
         } else {
             header.push_record(br##"##INFO=<ID=PROB_ABSENT,Number=A,Type=Float,Description="Probability absent (linear)">"##);
             header.push_record(br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Probability artifact (linear)">"##);
+            header.push_record(br##"##INFO=<ID=PROB_SOMATIC,Number=A,Type=Float,Description="Probability somatic (linear)">"##);
         }
 
         header.push_record(br##"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"##);
@@ -916,6 +942,38 @@ pub(crate) mod tests {
 
         let sample_afs = get_sample_afs(&record, &header, &samples_index_map, 0).unwrap();
         assert!(sample_afs.is_empty());
+    }
+
+    /* ====== BCF Specification check tests ===== ==== */
+
+    #[test]
+    fn test_is_phred_scaled_from_path_linear() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            use_phred: false,
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let is_phred = is_phred_scaled_from_path(tmp_vcf.path()).unwrap();
+        assert!(!is_phred, "Should detect linear probabilities");
+    }
+
+    #[test]
+    fn test_is_phred_scaled_from_path_phred() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            use_phred: true,
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let is_phred = is_phred_scaled_from_path(tmp_vcf.path()).unwrap();
+        assert!(is_phred, "Should detect PHRED-scaled probabilities");
+    }
+
+    #[test]
+    fn test_is_phred_scaled_from_path_invalid_file() {
+        let result = is_phred_scaled_from_path(Path::new("/nonexistent/file.vcf"));
+        assert!(result.is_err(), "Should fail for nonexistent file");
     }
 
     /* ====== BCF ALLELE Type tests ================== */
