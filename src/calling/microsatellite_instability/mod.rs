@@ -15,9 +15,16 @@ mod output;
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{
+    Context,
+    Result,
+};
 use log::info;
-use rust_htslib::bcf;
+use rust_htslib::bcf::{
+    self,
+    header::HeaderView,
+    Read,
+};
 
 use crate::cli::validate_vcf_file;
 use crate::constants::{
@@ -25,7 +32,10 @@ use crate::constants::{
     MIN_MSI_THRESHOLD
 };
 use crate::errors::Error;
-use crate::utils::bcf_utils::is_phred_scaled_from_path;
+use crate::utils::bcf_utils::{
+    is_phred_scaled_from_path,
+    validate_events_exist,
+};
 
 /* ======== CLI CONFIGURATION ===================== */
 
@@ -96,7 +106,9 @@ impl MSIConfig {
     /// Responsibilities:
     /// 1. Checks for valid MSI threshold;
     /// 2. Checks at least one output specified;
-    /// 3. Validates the calls file format using existing validators from cli.rs.
+    /// 3. Validates the calls file format using existing validators from cli.rs;
+    /// 4. Validates the calls file contains the specified sample.
+    /// 5. Validates the calls file contains the specified events in the header.
     pub fn validate(&self) -> Result<()> {
         if self.msi_threshold <= MIN_MSI_THRESHOLD {
             return Err(Error::MsiConfigThresholdInvalid {
@@ -115,8 +127,12 @@ impl MSIConfig {
             return Err(Error::MsiConfigOutputMissing.into());
         }
 
-        // Use existing validators from cli.rs to validate file format.
+        let vcf = bcf::Reader::from_path(&self.calls.as_path())
+            .context("Failed to open VCF file")?;
+        let header: HeaderView = vcf.header().clone();
+
         validate_vcf_file(&self.calls)?;
+        validate_events_exist(&header, &self.events)?;
 
         Ok(())
     }
