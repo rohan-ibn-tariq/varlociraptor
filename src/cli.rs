@@ -17,7 +17,7 @@ use itertools::Itertools;
 use structopt::StructOpt;
 use strum::IntoEnumIterator;
 
-use crate::calling;
+use crate::calling::microsatellite_instability as msi_calling;
 use crate::calling::variants::calling::{
     call_generic, CallWriter, DefaultCandidateFilter, SampleInfos,
 };
@@ -29,10 +29,13 @@ use crate::errors;
 use crate::estimation;
 use crate::estimation::alignment_properties::AlignmentProperties;
 use crate::estimation::microsatellite_instability as msi;
+use crate::{calling, constants};
 //use crate::estimation::sample_variants;
 //use crate::estimation::tumor_mutational_burden;
 use crate::filtration;
 use crate::grammar;
+use crate::preprocessing;
+use crate::preprocessing::microsatellite_instability as msi_preprocessing;
 use crate::reference;
 use crate::testcase;
 use crate::utils::bcf_utils;
@@ -59,7 +62,7 @@ pub const MIN_THREAD_COUNT: usize = 1;
 ///
 /// Returns
 /// `Ok(())` if the path points to a BED file, otherwise returns an error.
-fn validate_bed_file(path: &Path) -> Result<()> {
+pub(crate) fn validate_bed_file(path: &Path) -> Result<()> {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some(ext) if ext.eq_ignore_ascii_case("bed") => Ok(()),
         _ => bail!(errors::Error::BedFileInvalid {
@@ -76,7 +79,7 @@ fn validate_bed_file(path: &Path) -> Result<()> {
 ///
 /// Returns
 /// `Ok(())` if the path points to a valid VCF/BCF file, otherwise returns an error.
-fn validate_vcf_file(path: &Path) -> Result<()> {
+pub(crate) fn validate_vcf_file(path: &Path) -> Result<()> {
     let filename = match path.file_name().and_then(|name| name.to_str()) {
         Some(name) => name.to_lowercase(),
         None => bail!(errors::Error::VcfFileInvalid {
@@ -441,6 +444,34 @@ pub enum PreprocessKind {
             help = "Type of methylation information encoded in the reads. Use 'converted' for reads treated with bisulfite or EMSeq. Use 'annotated' for reads where methylation information is encoded in the MM and ML tags."
         )]
         methylation_readtype: Option<MethylationReadtype>,
+    },
+    #[structopt(
+        name = "microsatellite-instability",
+        visible_alias = "msi",
+        about = "Preprocess Microsatellite Instability (MSI) candidate variants. [status: EXPERIMENTAL]",
+        long_about = "Preprocess Microsatellite Instability (MSI) candidate variants with dummy indels and region annotation. [status: EXPERIMENTAL]",
+        usage = "varlociraptor preprocess msi microsatellite_regions.bed calls.vcf > enriched.vcf \
+                 varlociraptor preprocess msi microsatellite_regions.bed calls.bcf --output_vcf enriched.vcf",
+        setting = structopt::clap::AppSettings::ColoredHelp,
+    )]
+    MicrosatelliteInstability {
+        #[structopt(
+            parse(from_os_str),
+            help = "BED file (sorted) with microsatellite loci [chrom, start, end, name (format: <count>x<motif>)]."
+        )]
+        microsatellite_bed: PathBuf,
+        #[structopt(
+            parse(from_os_str),
+            help = "Candidate VCF/BCF (gzipped or uncompressed, sorted) file with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY)."
+        )]
+        candidate_vcf: PathBuf,
+        #[structopt(
+            long,
+            short = "o",
+            parse(from_os_str),
+            help = "Output file (VCF, BCF, or VCF.GZ; if omitted, writes BCF to STDOUT)"
+        )]
+        output: Option<PathBuf>,
     },
 }
 
@@ -837,6 +868,113 @@ pub enum CallKind {
     //     #[structopt(long, short = "t", help = "Number of threads to use.")]
     //     threads: usize,
     // },
+    #[structopt(
+        name = "microsatellite-instability",
+        visible_alias = "msi",
+        about = "Call Microsatellite Instability (MSI) for a sample. [status: EXPERIMENTAL]",
+        long_about = "Call Microsatellite Instability (MSI) from variant calls at microsatellite loci. \
+             Takes a sorted Varlociraptor-format VCF/BCF file, and produces \
+             either the MSI score distribution or MSI score evolution as Vega-Lite JSON output \
+             file(s) or their TSV plot data file(s). [status: EXPERIMENTAL]",
+        usage = "varlociraptor call microsatellite-instability calls.vcf \
+                 --sample HCT116 --events somatic_hct116 --threads 4 \
+                 --msi-threshold 3.5 --plot-pseudotime msi-pseudotime.vl.json \
+                 --data-pseudotime msi-pseudotime.tsv\n\n \
+                 varlociraptor estimate msi calls.bcf --sample HCT116 --events \
+                 somatic_hct116 --msi-threshold 3.0 --plot-distribution \
+                 msi-distribution.vl.json --data-distribution msi-distribution.tsv",
+        setting = structopt::clap::AppSettings::ColoredHelp,
+    )]
+    MicrosatelliteInstability {
+        #[structopt(
+            parse(from_os_str),
+            help = "VCF/BCF (gzipped or uncompressed) file with variant calls. This should come from varlociraptor preprocess msi, which adds dummy indels at microsatellite loci and annotates them with region information."
+        )]
+        calls: PathBuf,
+        #[structopt(long, required = true, help = "Sample to analyze.")]
+        sample: String,
+        #[structopt(
+            long,
+            required = true,
+            multiple = true,
+            help = "Event names to combine for MSI analysis (e.g., --events somatic_tumor high_vaf_somatic)"
+        )]
+        events: Vec<String>,
+        #[structopt(
+            long,
+            default_value = constants::DEFAULT_MSI_THRESHOLD,
+            help = "MSI classification threshold (must be > 0.0).",
+        )]
+        msi_threshold: f64,
+        #[structopt(
+            long = "af-thresholds",
+            hidden = true,
+            default_value = "1.0,0.8,0.6,0.4,0.2,0.1,0.05,0.02,0.0",
+            use_delimiter = true,
+            help = "Allele frequency thresholds for MSI evolution analysis (internal)."
+        )]
+        af_thresholds: Vec<f64>,
+        #[structopt(
+            long,
+            help = "Sliding window size (bp) for regional MSI heatmap analysis (default: 1,000,000). \
+                    Only used if --plot-heatmap or --data-heatmap specified."
+        )]
+        sliding_window: Option<u64>,
+        #[structopt(
+            long,
+            short = "t",
+            help = "Number of threads (must be >= 1, default: auto-detect best possible number)."
+        )]
+        threads: Option<usize>,
+        #[structopt(
+            long,
+            parse(from_os_str),
+            help = "Output path for MSI score distribution plot (Vega-Lite JSON). \
+                    Recommended: .vl.json extension."
+        )]
+        plot_distribution: Option<PathBuf>,
+        #[structopt(
+            long,
+            parse(from_os_str),
+            help = "Output path for pseudotime plot (Vega-Lite JSON), showing MSI \
+                    score evolution across allele frequency thresholds. \
+                    Recommended: .vl.json extension."
+        )]
+        plot_pseudotime: Option<PathBuf>,
+        #[structopt(
+            long,
+            parse(from_os_str),
+            help = "Output path for heatmap plot (Vega-Lite JSON), showing MSI score \
+                    evolution across allele frequency thresholds in sliding windows \
+                    across the genome. \
+                    Recommended: .vl.json extension."
+        )]
+        plot_heatmap: Option<PathBuf>,
+        #[structopt(
+            long,
+            parse(from_os_str),
+            help = "Output path for MSI score distribution data (TSV). \
+                    Recommended: .tsv extension."
+        )]
+        data_distribution: Option<PathBuf>,
+        #[structopt(
+            long,
+            parse(from_os_str),
+            help = "Output path for pseudotime data (TSV), showing MSI \
+                    score evolution across allele frequency thresholds. \
+                    Recommended: .tsv extension."
+        )]
+        data_pseudotime: Option<PathBuf>,
+        #[structopt(
+            long,
+            parse(from_os_str),
+            help = "Output path for windowed data (TSV), showing \
+                    MSI score evolution across allele frequency thresholds \
+                    in sliding windows across the genome. \
+                    Recommended: .tsv extension."
+        )]
+        data_heatmap: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, StructOpt, Serialize, Deserialize, Clone)]
@@ -1183,6 +1321,18 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                         _ => panic!("Unknown pairhmm mode '{}'", pairhmm_mode),
                     };
                 }
+                PreprocessKind::MicrosatelliteInstability {
+                    microsatellite_bed,
+                    candidate_vcf,
+                    output,
+                } => {
+                    let config = msi_preprocessing::PreprocessMSIConfig {
+                        microsatellite_bed,
+                        candidate_vcf,
+                        output,
+                    };
+                    preprocessing::microsatellite_instability::preprocess_ms_candidates(config)?;
+                }
             }
         }
         Varlociraptor::Call { kind } => {
@@ -1364,30 +1514,65 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                         }
                     }
                 } // CallKind::CNVs {
-                  //     calls,
-                  //     output,
-                  //     min_bayes_factor,
-                  //     threads,
-                  //     purity,
-                  //     max_dist,
-                  // } => {
-                  //     rayon::ThreadPoolBuilder::new()
-                  //         .num_threads(threads)
-                  //         .build_global()?;
+                //     calls,
+                //     output,
+                //     min_bayes_factor,
+                //     threads,
+                //     purity,
+                //     max_dist,
+                // } => {
+                //     rayon::ThreadPoolBuilder::new()
+                //         .num_threads(threads)
+                //         .build_global()?;
 
-                  //     if min_bayes_factor <= 1.0 {
-                  //         Err(errors::Error::InvalidMinBayesFactor)?
-                  //     }
+                //     if min_bayes_factor <= 1.0 {
+                //         Err(errors::Error::InvalidMinBayesFactor)?
+                //     }
 
-                  //     let mut caller = calling::cnvs::CallerBuilder::default()
-                  //         .bcfs(calls.as_ref(), output.as_ref())?
-                  //         .min_bayes_factor(min_bayes_factor)
-                  //         .purity(purity)
-                  //         .max_dist(max_dist)
-                  //         .build()
-                  //         .unwrap();
-                  //     caller.call()?;
-                  // }
+                //     let mut caller = calling::cnvs::CallerBuilder::default()
+                //         .bcfs(calls.as_ref(), output.as_ref())?
+                //         .min_bayes_factor(min_bayes_factor)
+                //         .purity(purity)
+                //         .max_dist(max_dist)
+                //         .build()
+                //         .unwrap();
+                //     caller.call()?;
+                // }
+                CallKind::MicrosatelliteInstability {
+                    calls,
+                    threads,
+                    msi_threshold,
+                    sample,
+                    events,
+                    af_thresholds,
+                    sliding_window,
+                    plot_distribution,
+                    plot_pseudotime,
+                    plot_heatmap,
+                    data_distribution,
+                    data_pseudotime,
+                    data_heatmap,
+                } => {
+                    let mut config = msi_calling::MSIConfig {
+                        calls,
+                        threads,
+                        msi_threshold,
+                        sample,
+                        events,
+                        is_phred: false, // will be set in set_defaults based on the input VCF/BCF
+                        af_thresholds,
+                        sliding_window,
+                        plot_distribution,
+                        plot_pseudotime,
+                        plot_heatmap,
+                        data_distribution,
+                        data_pseudotime,
+                        data_heatmap,
+                    };
+                    config.set_defaults()?;
+                    config.validate()?;
+                    calling::microsatellite_instability::call_msi(config)?;
+                }
             }
         }
         Varlociraptor::FilterCalls { method } => match method {
