@@ -453,6 +453,56 @@ fn validate_vcf_header_field(
     }
 }
 
+/// Validate that required events exist in VCF header.
+///
+/// Checks VCF header for presence of INFO/PROB_{EVENT} fields
+/// for each requested event name. Event names are automatically
+/// converted to uppercase and prefixed with "PROB_".
+///
+/// # Arguments
+/// * `header` - VCF header to check for event fields
+/// * `event_names` - Slice of event names to validate (e.g., ["somatic_tumor"])
+///
+/// # Returns
+/// * `Ok(())` if all event fields exist
+/// * `Err` if any event field is missing
+///
+/// # Errors
+/// Returns error if any INFO/PROB_{EVENT} field is not found in VCF header.
+/// Error message includes comma-separated list of missing events.
+///
+/// # Event Field Mapping
+/// Event name          -> INFO field checked
+/// "somatic_tumor"     -> INFO/PROB_SOMATIC_TUMOR
+/// "germline_normal"   -> INFO/PROB_GERMLINE_NORMAL
+///
+/// # Example
+/// assert!(validate_events_exist(&header, &vec!["somatic_tumor".to_string()]).is_ok());
+pub(crate) fn validate_events_exist(
+    header: &HeaderView,
+    event_names: &[String],
+) -> Result<()> {
+    let mut missing_events = Vec::new();
+
+    for event_name in event_names {
+        let field_name = format!("PROB_{}", event_name.to_uppercase());
+
+        if header.info_type(field_name.as_bytes()).is_err() {
+            missing_events.push(event_name.clone());
+        }
+    }
+
+    if !missing_events.is_empty() {
+        return Err(Error::VcfEventsMissing {
+            events: missing_events.join(", "),
+        }
+        .into());
+    }
+
+    info!("  - Events validated: {:?}", event_names);
+    Ok(())
+}
+
 /// Validate VCF header contains required fields for MSI analysis.
 ///
 /// Validates that mandatory INFO and FORMAT fields exist with correct types:
@@ -637,6 +687,8 @@ pub(crate) mod tests {
         pub af_values: Option<Vec<f32>>,
         pub prob_absent: Option<Vec<f32>>,
         pub prob_artifact: Option<Vec<f32>>,
+        pub prob_somatic: Option<Vec<f32>>,
+        pub prob_high_vaf: Option<Vec<f32>>,
         pub num_samples: usize,
         pub use_phred: bool,
     }
@@ -649,6 +701,8 @@ pub(crate) mod tests {
                 af_values: None,
                 prob_absent: None,
                 prob_artifact: None,
+                prob_somatic: None,
+                prob_high_vaf: None,
                 num_samples: 2,
                 use_phred: false,
             }
@@ -669,10 +723,12 @@ pub(crate) mod tests {
             header.push_record(br##"##INFO=<ID=PROB_ABSENT,Number=A,Type=Float,Description="Probability absent (PHRED)">"##);
             header.push_record(br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Probability artifact (PHRED)">"##);
             header.push_record(br##"##INFO=<ID=PROB_SOMATIC,Number=A,Type=Float,Description="Probability somatic (PHRED)">"##);
+            header.push_record(br##"##INFO=<ID=PROB_HIGH_VAF,Number=A,Type=Float,Description="Probability high VAF (PHRED)">"##);
         } else {
             header.push_record(br##"##INFO=<ID=PROB_ABSENT,Number=A,Type=Float,Description="Probability absent (linear)">"##);
             header.push_record(br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Probability artifact (linear)">"##);
             header.push_record(br##"##INFO=<ID=PROB_SOMATIC,Number=A,Type=Float,Description="Probability somatic (linear)">"##);
+            header.push_record(br##"##INFO=<ID=PROB_HIGH_VAF,Number=A,Type=Float,Description="Probability high VAF (linear)">"##);
         }
 
         header.push_record(br##"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"##);
@@ -738,6 +794,32 @@ pub(crate) mod tests {
         };
         rec.push_info_float(b"PROB_ARTIFACT", &prob_artifact)
             .unwrap();
+
+        // PROB_SOMATIC
+        let prob_somatic = match config.prob_somatic {
+            Some(ps) => ps,
+            None => {
+                if config.use_phred {
+                    vec![30.0; config.alt_alleles.len()]
+                } else {
+                    vec![0.001; config.alt_alleles.len()]
+                }
+            }
+        };
+        rec.push_info_float(b"PROB_SOMATIC", &prob_somatic).unwrap();
+
+        // PROB_HIGH_VAF
+        let prob_high_vaf = match config.prob_high_vaf {
+            Some(phv) => phv,
+            None => {
+                if config.use_phred {
+                    vec![40.0; config.alt_alleles.len()]
+                } else {
+                    vec![0.0001; config.alt_alleles.len()]
+                }
+            }
+        };
+        rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf).unwrap();
 
         // GT
         let mut genotypes = Vec::new();
@@ -1004,6 +1086,126 @@ pub(crate) mod tests {
     }
 
     /* ======== validate_vcf_file tests ============== */
+
+    #[test]
+    fn test_validate_events_exist_single_event() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_events_exist(
+            header,
+            &["somatic".to_string()],
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_events_exist_multiple_events() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_events_exist(
+            header,
+            &["somatic".to_string(), "high_vaf".to_string()],
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_events_exist_missing_event() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_events_exist(
+            header,
+            &["nonexistent_event".to_string()],
+        );
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("nonexistent_event"));
+        assert!(err_msg.contains("PROB_"));
+    }
+
+    #[test]
+    fn test_validate_events_exist_case_insensitive() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        // Event field is PROB_SOMATIC (uppercase)
+        // User provides lowercase
+        let result = validate_events_exist(
+            header,
+            &["somatic".to_string()],
+        );
+
+        assert!(result.is_ok(), "Should handle case conversion");
+    }
+
+    #[test]
+    fn test_validate_events_exist_multiple_missing() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_events_exist(
+            header,
+            &["missing1".to_string(), "missing2".to_string()],
+        );
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("missing1"));
+        assert!(err_msg.contains("missing2"));
+    }
+
+    #[test]
+    fn test_validate_events_exist_partial_match() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        // One valid, one missing
+        let result = validate_events_exist(
+            header,
+            &["somatic".to_string(), "missing_event".to_string()],
+        );
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("missing_event"));
+        assert!(!err_msg.contains("somatic"));  // Valid one not in error
+    }
 
     #[test]
     fn test_validate_required_vcf_fields_all_valid() {
