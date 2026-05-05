@@ -20,46 +20,35 @@ use std::path::PathBuf;
 use anyhow::Result;
 use log::info;
 
+use crate::cli::{validate_bed_file, validate_vcf_file};
 use crate::errors::Error;
+use crate::utils::ms_bed::validate_bed_file as validate_ms_bed_file;
 
 /* ======== CLI CONFIGURATION ===================== */
 
 /// Configuration for MS candidate preprocessing pipeline.
 ///
-/// Contains all parameters needed for the MSI preprocessing subcommand,
+/// Contains all parameters needed for the MSI preprocessing workflow,
 /// populated from CLI arguments.
 #[derive(Debug)]
 pub struct PreprocessMSIConfig {
-    /// Path to BED file(should be sorted) with microsatellite regions.
+    /// Path to BED file (sorted) with microsatellite regions.
     pub microsatellite_bed: PathBuf,
-    /// Candidate VCF/BCF file with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY).
-    pub calls: PathBuf,
-    /// Output VCF file (if omitted, writes to STDOUT; logs go to STDERR).
-    pub output_vcf: Option<PathBuf>,
+    /// Path to candidate VCF/BCF file (sorted) with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY).
+    pub candidate_vcf: PathBuf,
+    /// Output file path (VCF, BCF, or VCF.GZ; if omitted, writes BCF to STDOUT).
+    pub output: Option<PathBuf>,
 }
 
 impl PreprocessMSIConfig {
     /// Validate PreprocessMSIConfig
     pub fn validate(&self) -> Result<()> {
-        // Validate BED file
-        if !self.microsatellite_bed.exists() {
-            return Err(anyhow::anyhow!(
-                "BED file does not exist: {}",
-                self.microsatellite_bed.display()
-            ));
-        }
-
-        // Validate VCF file
-        if !self.calls.exists() {
-            return Err(anyhow::anyhow!(
-                "VCF file does not exist: {}",
-                self.calls.display()
-            ));
-        }
-
         // Use existing validators from cli.rs to validate file formats.
-        crate::cli::validate_bed_file(&self.microsatellite_bed)?;
-        crate::cli::validate_vcf_file(&self.calls)?;
+        validate_bed_file(&self.microsatellite_bed)?;
+        validate_vcf_file(&self.candidate_vcf)?;
+
+        // Additional file specifc validators:
+        validate_ms_bed_file(&self.microsatellite_bed)?;
 
         Ok(())
     }
