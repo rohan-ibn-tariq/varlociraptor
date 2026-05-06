@@ -1713,7 +1713,7 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                 /* MSI or content specific validations */
                 ms_bed::validate_bed_file(&microsatellite_bed)?;
                 let (samples_info, is_phred) =
-                    bcf_utils::validate_vcf_file(&calls, &samples_exclusion)?;
+                    bcf_utils::validate_vcf_file_ex(&calls, &samples_exclusion)?;
                 let config = msi::MsiConfig {
                     microsatellite_bed,
                     calls,

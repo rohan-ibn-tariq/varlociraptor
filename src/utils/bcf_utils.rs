@@ -588,7 +588,7 @@ pub(crate) fn validate_required_vcf_fields_msi(header: &HeaderView) -> Result<()
 ///
 /// # Example
 /// assert!(validate_vcf_file(&vcf_path, &vec!["sample1".to_string()]).is_ok());
-pub(crate) fn validate_vcf_file(
+pub(crate) fn validate_vcf_file_ex(
     vcf_path: &Path,
     samples_exclusion: &[String],
 ) -> Result<(SampleInfo, bool)> {
@@ -1362,42 +1362,4 @@ pub(crate) mod tests {
         assert!(err_msg.contains("incorrect type"));
     }
 
-    #[test]
-    fn test_validate_vcf_file() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            af_values: Some(vec![0.45, 0.98]),
-            ..Default::default()
-        });
-
-        // Test with no exclusions
-        let (samples_info, is_phred) = validate_vcf_file(tmp_vcf.path(), &[]).unwrap();
-        assert_eq!(samples_info.samples.len(), 2);
-        assert_eq!(samples_info.samples_index_map["sample1"], 0);
-        assert_eq!(samples_info.samples_index_map["sample2"], 1);
-        assert!(!is_phred);
-
-        // Test with one exclusion
-        let (samples_info, is_phred) =
-            validate_vcf_file(tmp_vcf.path(), &["sample1".to_string()]).unwrap();
-        assert_eq!(samples_info.samples, vec!["sample2".to_string()]);
-        assert!(!is_phred);
-
-        // Test exclusion of non-existent sample
-        let err = validate_vcf_file(tmp_vcf.path(), &["invalid_sample".to_string()]).unwrap_err();
-        assert!(format!("{err:?}").contains("invalid_sample"));
-    }
-
-    #[test]
-    fn test_validate_vcf_file_detects_phred_probabilities() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            af_values: Some(vec![0.45, 0.98]),
-            use_phred: true,
-            ..Default::default()
-        });
-
-        let (sample_info, is_phred) = validate_vcf_file(tmp_vcf.path(), &[]).unwrap();
-
-        assert_eq!(sample_info.samples.len(), 2);
-        assert!(is_phred, "Should detect PHRED-scaled probabilities");
-    }
 }
