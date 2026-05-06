@@ -34,6 +34,7 @@ use crate::constants::{
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
     is_phred_scaled_from_path,
+    validate_samples_exist,
     validate_events_exist,
 };
 
@@ -132,6 +133,7 @@ impl MSIConfig {
         let header: HeaderView = vcf.header().clone();
 
         validate_vcf_file(&self.calls)?;
+        validate_samples_exist(&header, &[self.sample.clone()])?;
         validate_events_exist(&header, &self.events)?;
 
         Ok(())

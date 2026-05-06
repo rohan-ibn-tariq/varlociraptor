@@ -453,6 +453,48 @@ fn validate_vcf_header_field(
     }
 }
 
+/// Validate that required samples exist in VCF header.
+///
+/// Checks VCF header for presence of all requested sample names.
+///
+/// # Arguments
+/// * `header` - VCF header to validate
+/// * `required_samples` - Slice of sample names to validate
+///
+/// # Returns
+/// * `Ok(())` if all samples exist
+/// * `Err` if any sample is missing
+///
+/// # Errors
+/// Returns error if any sample name is not found in VCF header.
+/// Error message includes comma-separated list of missing samples.
+///
+/// # Example
+/// assert!(validate_samples_exist(&header, &vec!["tumor".to_string()]).is_ok());
+pub(crate) fn validate_samples_exist(
+    header: &HeaderView,
+    required_samples: &[String],
+) -> Result<()> {
+    let mut missing = Vec::new();
+
+    for sample_name in required_samples {
+        if header.sample_id(sample_name.as_bytes()).is_none() {
+            missing.push(sample_name.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(Error::VcfSamplesNotFound {
+            sample: missing.join(", "),
+        }
+        .into());
+    }
+
+    info!("  - Samples validated: {:?}", required_samples);
+
+    Ok(())
+}
+
 /// Validate that required events exist in VCF header.
 ///
 /// Checks VCF header for presence of INFO/PROB_{EVENT} fields
@@ -1086,6 +1128,104 @@ pub(crate) mod tests {
     }
 
     /* ======== validate_vcf_file tests ============== */
+
+    #[test]
+    fn test_validate_samples_exist_single_sample() {
+        let (tmp_vcf, sample_names) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_samples_exist(
+            header,
+            &[sample_names[0].clone()],
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_samples_exist_multiple_samples() {
+        let (tmp_vcf, sample_names) = create_test_vcf(TestVcfConfig {
+            num_samples: 3,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let to_validate = vec![
+            sample_names[0].clone(),
+            sample_names[2].clone(),
+        ];
+
+        let result = validate_samples_exist(header, &to_validate);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_samples_exist_missing_sample() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 2,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_samples_exist(
+            header,
+            &["nonexistent_sample".to_string()],
+        );
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("nonexistent_sample"));
+    }
+
+    #[test]
+    fn test_validate_samples_exist_multiple_missing() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = validate_samples_exist(
+            header,
+            &["missing1".to_string(), "missing2".to_string()],
+        );
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("missing1"));
+        assert!(err_msg.contains("missing2"));
+    }
+
+    #[test]
+    fn test_validate_samples_exist_case_sensitive() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        // Sample is "sample1" (lowercase)
+        let result = validate_samples_exist(
+            header,
+            &["Sample1".to_string()],  // Uppercase S
+        );
+
+        assert!(result.is_err(), "Sample names are case-sensitive");
+    }
 
     #[test]
     fn test_validate_events_exist_single_event() {
