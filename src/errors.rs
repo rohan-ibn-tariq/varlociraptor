@@ -81,8 +81,8 @@ pub(crate) enum Error {
     VcfFileInvalid { path: PathBuf },
     #[error("VCF/BCF file contains no samples")]
     VcfSamplesMissing,
-    #[error("VCF/BCF file does not contain sample: {sample}")]
-    VcfSampleNotFound { sample: String },
+    #[error("VCF/BCF file does not contain sample(s): {sample}")]
+    VcfSamplesNotFound { sample: String },
     #[error("VCF/BCF header missing required event field(s): {events}. Events must exist as INFO/PROB_{{EVENT}} fields")]
     VcfEventsMissing { events: String },
     #[error("VCF/BCF file is empty (no variant records)")]
