@@ -547,9 +547,7 @@ pub(crate) fn validate_events_exist(
 
 /// Validate VCF header contains required fields for MSI analysis.
 ///
-/// Validates that mandatory INFO and FORMAT fields exist with correct types:
-/// - INFO:PROB_ABSENT (Type=Float, Number=A)
-/// - INFO:PROB_ARTIFACT (Type=Float, Number=A)
+/// Validates that mandatory INFO or FORMAT fields exist with correct types:
 /// - FORMAT:AF (Type=Float, Number=A)
 ///
 /// # Arguments
@@ -559,22 +557,6 @@ pub(crate) fn validate_events_exist(
 /// * `Ok(())` if all required fields present with correct types
 /// * `Err` if any field is missing or has incorrect type
 pub(crate) fn validate_required_vcf_fields_msi(header: &HeaderView) -> Result<()> {
-    validate_vcf_header_field(
-        header.info_type(b"PROB_ABSENT"),
-        "INFO",
-        "PROB_ABSENT",
-        TagType::Float,
-        TagLength::AltAlleles,
-    )?;
-
-    validate_vcf_header_field(
-        header.info_type(b"PROB_ARTIFACT"),
-        "INFO",
-        "PROB_ARTIFACT",
-        TagType::Float,
-        TagLength::AltAlleles,
-    )?;
-
     validate_vcf_header_field(
         header.format_type(b"AF"),
         "FORMAT",
@@ -1350,8 +1332,6 @@ pub(crate) mod tests {
     #[test]
     fn test_validate_required_vcf_fields_all_valid() {
         let header = create_header_view(&[
-            br##"##INFO=<ID=PROB_ABSENT,Number=A,Type=Float,Description="Test">"##,
-            br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Test">"##,
             br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="Test">"##,
         ]);
 
@@ -1362,21 +1342,18 @@ pub(crate) mod tests {
     fn test_validate_required_vcf_fields_missing_field() {
         let header = create_header_view(&[
             br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Test">"##,
-            br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="Test">"##,
         ]);
 
         let result = validate_required_vcf_fields_msi(&header);
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(err_msg.contains("PROB_ABSENT") && err_msg.contains("missing"));
+        assert!(err_msg.contains("AF") && err_msg.contains("missing"));
     }
 
     #[test]
     fn test_validate_required_vcf_fields_wrong_type() {
         let header = create_header_view(&[
-            br##"##INFO=<ID=PROB_ABSENT,Number=A,Type=Integer,Description="Test">"##,
-            br##"##INFO=<ID=PROB_ARTIFACT,Number=A,Type=Float,Description="Test">"##,
-            br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="Test">"##,
+            br##"##FORMAT=<ID=AF,Number=A,Type=Integer,Description="Test">"##,
         ]);
 
         let result = validate_required_vcf_fields_msi(&header);
