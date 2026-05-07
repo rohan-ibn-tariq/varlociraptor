@@ -186,7 +186,6 @@ pub(crate) fn validate_bed_file(bed_path: &PathBuf) -> Result<()> {
         Some(Err(e)) => Err(e).context("Failed to read first BED record"),
         Some(Ok(record)) => {
             let first_region = parse_bed_record(&record)?;
-            info!("  - BED file validated successfully");
             info!(
                 "  - First region: ({} {}-{} {}x{}) valid-motif={}",
                 first_region.chrom,
@@ -196,6 +195,7 @@ pub(crate) fn validate_bed_file(bed_path: &PathBuf) -> Result<()> {
                 first_region.motif,
                 first_region.is_valid_motif(),
             );
+            info!("  - BED file validated successfully");
             Ok(())
         }
     }
