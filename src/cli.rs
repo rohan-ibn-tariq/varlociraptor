@@ -1326,11 +1326,24 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     candidate_vcf,
                     output,
                 } => {
+                    info!("==============================================");
+                    info!("MSI Preprocessing");
+                    info!("==============================================");
+
+                    /* Set up preprocessing configuration */
                     let config = msi_preprocessing::PreprocessMSIConfig {
                         microsatellite_bed,
                         candidate_vcf,
                         output,
                     };
+
+                    /* Validate the configuration */
+                    info!("----------------------------------------------");
+                    info!("Step 0: Validating Files and Cli Arguments");
+                    info!("----------------------------------------------");
+                    config.validate()?;
+
+                    /* Dispatch preprocessing */
                     preprocessing::microsatellite_instability::preprocess_ms_candidates(config)?;
                 }
             }
