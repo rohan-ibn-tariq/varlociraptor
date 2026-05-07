@@ -1339,7 +1339,7 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
 
                     /* Validate the configuration */
                     info!("----------------------------------------------");
-                    info!("Step 0: Validating Files and Cli Arguments");
+                    info!("Step 0: Validating Files or CLI Arguments");
                     info!("----------------------------------------------");
                     config.validate()?;
 

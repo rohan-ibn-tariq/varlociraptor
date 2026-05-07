@@ -54,6 +54,7 @@ impl PreprocessMSIConfig {
 
         // Additional file specifc validators:
         validate_ms_bed_file(&self.microsatellite_bed)?;
+        info!("Validating VCF file: {}", self.candidate_vcf.display());
         validate_ms_vcf_file(&mut vcf)?;
 
         Ok(())
