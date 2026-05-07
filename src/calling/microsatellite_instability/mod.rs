@@ -15,27 +15,15 @@ mod output;
 
 use std::path::PathBuf;
 
-use anyhow::{
-    Context,
-    Result,
-};
+use anyhow::{Context, Result};
 use log::info;
-use rust_htslib::bcf::{
-    self,
-    header::HeaderView,
-    Read,
-};
+use rust_htslib::bcf::{self, header::HeaderView, Read};
 
 use crate::cli::validate_vcf_file;
-use crate::constants::{
-    DEFAULT_SLIDING_WINDOW_SIZE,
-    MIN_MSI_THRESHOLD
-};
+use crate::constants::{DEFAULT_SLIDING_WINDOW_SIZE, MIN_MSI_THRESHOLD};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
-    is_phred_scaled_from_path,
-    validate_samples_exist,
-    validate_events_exist,
+    is_phred_scaled_from_path, validate_events_exist, validate_samples_exist,
 };
 
 /* ======== CLI CONFIGURATION ===================== */
@@ -128,8 +116,8 @@ impl MSIConfig {
             return Err(Error::MsiConfigOutputMissing.into());
         }
 
-        let vcf = bcf::Reader::from_path(&self.calls.as_path())
-            .context("Failed to open VCF file")?;
+        let vcf =
+            bcf::Reader::from_path(&self.calls.as_path()).context("Failed to open VCF file")?;
         let header: HeaderView = vcf.header().clone();
 
         validate_vcf_file(&self.calls)?;
