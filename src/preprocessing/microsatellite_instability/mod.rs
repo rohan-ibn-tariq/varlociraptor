@@ -17,11 +17,13 @@ mod intersection;
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::info;
+use rust_htslib::bcf;
 
 use crate::cli::{validate_bed_file, validate_vcf_file};
 use crate::errors::Error;
+use crate::utils::bcf_utils::validate_vcf_file as validate_ms_vcf_file;
 use crate::utils::ms_bed::validate_bed_file as validate_ms_bed_file;
 
 /* ======== CLI CONFIGURATION ===================== */
@@ -47,12 +49,17 @@ impl PreprocessMSIConfig {
         validate_bed_file(&self.microsatellite_bed)?;
         validate_vcf_file(&self.candidate_vcf)?;
 
+        let mut vcf =
+            bcf::Reader::from_path(&self.candidate_vcf).context("Failed to open candidate VCF")?;
+
         // Additional file specifc validators:
         validate_ms_bed_file(&self.microsatellite_bed)?;
+        validate_ms_vcf_file(&mut vcf)?;
 
         Ok(())
     }
 }
+
 /* ================================================ */
 
 /// Main Orchestrator for MSI candidate preprocessing workflow.

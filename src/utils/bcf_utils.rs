@@ -520,10 +520,7 @@ pub(crate) fn validate_samples_exist(
 ///
 /// # Example
 /// assert!(validate_events_exist(&header, &vec!["somatic_tumor".to_string()]).is_ok());
-pub(crate) fn validate_events_exist(
-    header: &HeaderView,
-    event_names: &[String],
-) -> Result<()> {
+pub(crate) fn validate_events_exist(header: &HeaderView, event_names: &[String]) -> Result<()> {
     let mut missing_events = Vec::new();
 
     for event_name in event_names {
@@ -566,6 +563,35 @@ pub(crate) fn validate_required_vcf_fields_msi(header: &HeaderView) -> Result<()
     )?;
 
     Ok(())
+}
+
+/// Validate VCF file has at least one variant.
+///
+/// Simple sanity check - ensures file is not empty and logs first variant position.
+///
+/// # Arguments
+/// * `vcf` - VCF reader (must be at start of file)
+///
+/// # Returns
+/// * `Ok(())` if file has at least one variant
+/// * `Err` if file is empty or read fails
+pub(crate) fn validate_vcf_file(vcf: &mut bcf::Reader) -> Result<()> {
+    let header = vcf.header().clone();
+
+    match vcf.records().next() {
+        None => Err(Error::VcfFileEmpty.into()),
+        Some(Err(e)) => Err(Error::VcfRecordReadFailed {
+            details: e.to_string(),
+        }
+        .into()),
+        Some(Ok(record)) => {
+            let chrom = get_chrom(&record, &header)?;
+            let pos = record.pos();
+            info!("  - First variant: {}:{}", chrom, pos + 1);
+            info!("  - VCF file validated successfully");
+            Ok(())
+        }
+    }
 }
 
 /// Validate VCF file and extract sample information.
@@ -843,7 +869,8 @@ pub(crate) mod tests {
                 }
             }
         };
-        rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf).unwrap();
+        rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf)
+            .unwrap();
 
         // GT
         let mut genotypes = Vec::new();
@@ -1121,10 +1148,7 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_samples_exist(
-            header,
-            &[sample_names[0].clone()],
-        );
+        let result = validate_samples_exist(header, &[sample_names[0].clone()]);
 
         assert!(result.is_ok());
     }
@@ -1139,10 +1163,7 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let to_validate = vec![
-            sample_names[0].clone(),
-            sample_names[2].clone(),
-        ];
+        let to_validate = vec![sample_names[0].clone(), sample_names[2].clone()];
 
         let result = validate_samples_exist(header, &to_validate);
 
@@ -1159,10 +1180,7 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_samples_exist(
-            header,
-            &["nonexistent_sample".to_string()],
-        );
+        let result = validate_samples_exist(header, &["nonexistent_sample".to_string()]);
 
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
@@ -1179,10 +1197,8 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_samples_exist(
-            header,
-            &["missing1".to_string(), "missing2".to_string()],
-        );
+        let result =
+            validate_samples_exist(header, &["missing1".to_string(), "missing2".to_string()]);
 
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
@@ -1203,7 +1219,7 @@ pub(crate) mod tests {
         // Sample is "sample1" (lowercase)
         let result = validate_samples_exist(
             header,
-            &["Sample1".to_string()],  // Uppercase S
+            &["Sample1".to_string()], // Uppercase S
         );
 
         assert!(result.is_err(), "Sample names are case-sensitive");
@@ -1219,10 +1235,7 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_events_exist(
-            header,
-            &["somatic".to_string()],
-        );
+        let result = validate_events_exist(header, &["somatic".to_string()]);
 
         assert!(result.is_ok());
     }
@@ -1237,10 +1250,8 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_events_exist(
-            header,
-            &["somatic".to_string(), "high_vaf".to_string()],
-        );
+        let result =
+            validate_events_exist(header, &["somatic".to_string(), "high_vaf".to_string()]);
 
         assert!(result.is_ok());
     }
@@ -1255,10 +1266,7 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_events_exist(
-            header,
-            &["nonexistent_event".to_string()],
-        );
+        let result = validate_events_exist(header, &["nonexistent_event".to_string()]);
 
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
@@ -1278,10 +1286,7 @@ pub(crate) mod tests {
 
         // Event field is PROB_SOMATIC (uppercase)
         // User provides lowercase
-        let result = validate_events_exist(
-            header,
-            &["somatic".to_string()],
-        );
+        let result = validate_events_exist(header, &["somatic".to_string()]);
 
         assert!(result.is_ok(), "Should handle case conversion");
     }
@@ -1296,10 +1301,8 @@ pub(crate) mod tests {
         let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
         let header = vcf.header();
 
-        let result = validate_events_exist(
-            header,
-            &["missing1".to_string(), "missing2".to_string()],
-        );
+        let result =
+            validate_events_exist(header, &["missing1".to_string(), "missing2".to_string()]);
 
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
@@ -1326,14 +1329,13 @@ pub(crate) mod tests {
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("missing_event"));
-        assert!(!err_msg.contains("somatic"));  // Valid one not in error
+        assert!(!err_msg.contains("somatic")); // Valid one not in error
     }
 
     #[test]
     fn test_validate_required_vcf_fields_all_valid() {
-        let header = create_header_view(&[
-            br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="Test">"##,
-        ]);
+        let header =
+            create_header_view(&[br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="Test">"##]);
 
         assert!(validate_required_vcf_fields_msi(&header).is_ok());
     }
@@ -1362,4 +1364,64 @@ pub(crate) mod tests {
         assert!(err_msg.contains("incorrect type"));
     }
 
+    #[test]
+    fn test_validate_vcf_file_with_variant() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"T"],
+            af_values: Some(vec![0.5]),
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let mut vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+
+        let result = validate_vcf_file(&mut vcf);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_vcf_file_empty() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut header = bcf::Header::new();
+        header.push_record(br"##fileformat=VCFv4.2");
+        header.push_record(br"##contig=<ID=chr1,length=1000000>");
+        header.push_record(br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="AF">"##);
+        header.push_sample(b"sample1");
+
+        let writer = bcf::Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+        drop(writer); // No records written
+
+        let mut vcf = bcf::Reader::from_path(tmp.path()).unwrap();
+
+        let result = validate_vcf_file(&mut vcf);
+        assert!(result.is_err());
+
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("empty") || err_msg.contains("no variant"));
+    }
+
+    #[test]
+    fn test_validate_vcf_file_corrupted() {
+        let tmp = NamedTempFile::new().unwrap();
+
+        // Write valid header but invalid record line
+        std::fs::write(
+            tmp.path(),
+            b"##fileformat=VCFv4.2\n\
+            ##contig=<ID=chr1,length=1000>\n\
+            ##FORMAT=<ID=AF,Number=A,Type=Float,Description=\"AF\">\n\
+            #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample1\n\
+            chr1\tINVALID_POS\t.\tA\tT\t.\t.\t.\tAF\t0.5\n",
+        )
+        .unwrap();
+
+        let mut vcf = bcf::Reader::from_path(tmp.path()).unwrap();
+
+        let result = validate_vcf_file(&mut vcf);
+        assert!(result.is_err());
+
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("read") || err_msg.contains("parse"));
+    }
 }
