@@ -450,8 +450,8 @@ pub enum PreprocessKind {
         visible_alias = "msi",
         about = "Preprocess Microsatellite Instability (MSI) candidate variants. [status: EXPERIMENTAL]",
         long_about = "Preprocess Microsatellite Instability (MSI) candidate variants with dummy indels and region annotation. [status: EXPERIMENTAL]",
-        usage = "varlociraptor preprocess msi microsatellite_regions.bed calls.vcf > enriched.vcf \
-                 varlociraptor preprocess msi microsatellite_regions.bed calls.bcf --output_vcf enriched.vcf",
+        usage = "\tvarlociraptor preprocess msi microsatellite_regions.bed calls.vcf > enriched.vcf\n \
+                 \tvarlociraptor preprocess msi microsatellite_regions.bed calls.bcf --output_vcf enriched.vcf",
         setting = structopt::clap::AppSettings::ColoredHelp,
     )]
     MicrosatelliteInstability {
