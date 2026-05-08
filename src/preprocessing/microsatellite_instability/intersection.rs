@@ -133,6 +133,67 @@ fn is_perfect_repeat(alt_seq: &[u8], svlen: i32, motif: &str, ref_seq: &[u8]) ->
     RepeatStatus::Perfect
 }
 
+/// Analyze a variant if it should be included in preprocessed output.
+///
+/// This function processes a single variant-allele pair to determine if it's
+/// relevant for preprocessed output. It performs the following steps:
+///
+/// # Algorithm
+/// 1. **Filtering**: Skip variants that aren't relevant for MSI:
+///    - Reference alleles (ALT=<REF>)
+///    - Symbolic alleles (<DEL>, <INS>)
+///    - Breakends (complex structural variants)
+///    - Spanning deletions (*)
+///    - Non-indel variants
+/// 2. **Check Perfect Repeat Status**:
+///    - Calculate SVLEN (indel length)
+///    - Verify indel is perfect tandem repeat of motif
+///
+/// # Arguments
+/// * `record` - BCF record representing the variant
+/// * `header` - BCF header for metadata access
+/// * `alt_idx` - Index of the alternate allele to analyze
+/// * `region` - BED region context for motif information
+///
+/// # Returns
+/// * `Ok(true)` - Variant is a perfect MS indel at this locus
+/// * `Ok(false)` - Variant should be skipped (not relevant for MSI quantification)
+/// * `Err` - Error reading variant data
+///
+/// # Example
+/// assert!(should_include_variant(&record, &header, 0, &region).unwrap());
+fn should_include_variant(
+    record: &bcf::Record,
+    header: &HeaderView,
+    alt_idx: usize,
+    region: &BedRegion,
+) -> Result<bool> {
+    let alleles = record.alleles();
+    let ref_allele = alleles[0];
+    let alt_allele = alleles[alt_idx + 1]; // +1 because alleles[0] is REF
+
+    /* 1. Filter non indel variants */
+    if is_reference_allele(alt_allele)
+        || is_symbolic(alt_allele)
+        || is_breakend(alt_allele)
+        || is_spanning_deletion(alt_allele)
+        || !is_indel(ref_allele, alt_allele)
+    {
+        debug!(
+            "Filtering non-indel variant at {}:{}",
+            get_chrom(record, header)?,
+            record.pos() + 1
+        );
+        return Ok(false);
+    }
+
+    /* 2. Check Perfect Repeat Status */
+    let svlen = get_svlen(record, alt_idx, ref_allele, alt_allele)?;
+    let repeat_status = is_perfect_repeat(alt_allele, svlen, &region.motif, ref_allele);
+
+    Ok(repeat_status == RepeatStatus::Perfect)
+}
+
 /* ================================================ */
 
 /* ============ Streaming Intersection ============ */
@@ -283,6 +344,127 @@ mod tests {
             is_perfect_repeat(b"TCAG", 3, "TCAG", b"A"),
             RepeatStatus::NA
         );
+    }
+
+    /* ========== analyze_variant tests ============== */
+
+    #[test]
+    fn test_should_include_variant_filters_snv() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"T"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = reader.header().clone();
+        let record = reader.records().next().unwrap().unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 0,
+            end: 200,
+            motif: "A".to_string(),
+        };
+
+        let result = should_include_variant(&record, &header, 0, &region).unwrap();
+        assert!(!result); // SNV should be filtered out
+    }
+
+    #[test]
+    fn test_should_include_variant_perfect_indel() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAG"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = reader.header().clone();
+        let record = reader.records().next().unwrap().unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 0,
+            end: 201,
+            motif: "CAG".to_string(),
+        };
+
+        let result = should_include_variant(&record, &header, 0, &region).unwrap();
+
+        assert!(result); // Perfect indel should be included
+    }
+
+    #[test]
+    fn test_should_include_variant_multi_allelic() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"T", b"ATG"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = reader.header().clone();
+        let record = reader.records().next().unwrap().unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 0,
+            end: 200,
+            motif: "TG".to_string(),
+        };
+
+        // alt_idx=0 is SNV (T) - should filter out
+        assert!(!should_include_variant(&record, &header, 0, &region).unwrap());
+
+        // alt_idx=1 is indel (ATG) - should include
+        assert!(should_include_variant(&record, &header, 1, &region).unwrap());
+    }
+
+    #[test]
+    fn test_should_include_variant_filters_symbolic() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"<DEL>"],
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = reader.header().clone();
+        let record = reader.records().next().unwrap().unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 0,
+            end: 200,
+            motif: "A".to_string(),
+        };
+
+        let result = should_include_variant(&record, &header, 0, &region).unwrap();
+        assert!(!result); // Symbolic allele should be filtered out
+    }
+
+    #[test]
+    fn test_should_include_variant_imperfect_repeat() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAT"], // Not perfect CAG repeat
+            ..Default::default()
+        });
+
+        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = reader.header().clone();
+        let record = reader.records().next().unwrap().unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 0,
+            end: 201,
+            motif: "CAG".to_string(),
+        };
+
+        let result = should_include_variant(&record, &header, 0, &region).unwrap();
+        assert!(!result); // Imperfect repeat should be filtered
     }
 
     /* ====== variant_overlaps_region tests ========== */
