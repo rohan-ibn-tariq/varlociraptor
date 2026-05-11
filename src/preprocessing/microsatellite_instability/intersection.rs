@@ -244,6 +244,67 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
     }
 }
 
+/// Inject a dummy deletion for a region with no observed perfect indels.
+///
+/// Creates a hypothetical deletion of one motif unit positioned after the
+/// first repeat. Uses the last base of the first motif as anchor, avoiding
+/// the need for flanking sequence outside the region.
+///
+/// # Arguments
+/// * `writer` - VCF writer
+/// * `region` - BED region requiring dummy indel
+/// * `header` - VCF header
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if chromosome not found or motif is empty
+///
+/// # Example
+/// assert!(inject_dummy_deletion(&mut writer, &region, &header).is_ok());
+fn inject_dummy_deletion(
+    writer: &mut Writer,
+    region: &BedRegion,
+    header: &HeaderView,
+) -> Result<()> {
+    let mut record = writer.empty_record();
+
+    let rid =
+        header
+            .name2rid(region.chrom.as_bytes())
+            .map_err(|_| Error::MsiChromosomeNotFound {
+                chrom: region.chrom.clone(),
+            })?;
+    record.set_rid(Some(rid));
+
+    let motif_bytes = region.motif.as_bytes();
+
+    if motif_bytes.is_empty() {
+        return Err(Error::MsiBedMotifInvalid {
+            motif: "(empty)".to_string(),
+        }
+        .into());
+    }
+
+    let deletion_pos = region.start + (motif_bytes.len() as u64) - 1;
+    record.set_pos(deletion_pos as i64);
+
+    let anchor = vec![motif_bytes[motif_bytes.len() - 1]];
+
+    let mut ref_allele = anchor.clone();
+    ref_allele.extend_from_slice(motif_bytes);
+
+    let alt_allele = anchor;
+
+    record.set_alleles(&[&ref_allele, &alt_allele])?;
+
+    let region_id = region.region_id();
+    record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
+
+    writer.write(&record)?;
+
+    Ok(())
+}
+
 /* ================================================ */
 
 #[cfg(test)]
@@ -269,6 +330,18 @@ mod tests {
     //     writeln!(tmp_bed.as_file(), "chrX\t172\t179\t7xT").unwrap(); // pos 175 inside [172, 179)
     //     tmp_bed
     // }
+
+    /* ============ VCF Helpers  ======================= */
+    /// Create minimal VCF header for dummy indel tests
+    fn create_minimal_vcf_header() -> bcf::Header {
+        let mut header = bcf::Header::new();
+        header.push_record(br"##fileformat=VCFv4.2");
+        header.push_record(br"##contig=<ID=chr1,length=1000000>");
+        header.push_record(
+            br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID">"##,
+        );
+        header
+    }
 
     /* ========== is_perfect_repeat tests ============ */
 
@@ -648,5 +721,128 @@ mod tests {
 
         // ALT2 overlaps region2 (indel at 103)
         assert!(variant_overlaps_region(&record, &region2, 1));
+    }
+
+    /* ====== inject_dummy_deletion tests ============ */
+
+    #[test]
+    fn test_inject_dummy_deletion_simple_motif() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 1000,
+            end: 1021,
+            motif: "CAG".to_string(),
+        };
+
+        let header_view = writer.header().clone();
+        inject_dummy_deletion(&mut writer, &region, &header_view).unwrap();
+        drop(writer);
+
+        let mut reader = bcf::Reader::from_path(tmp.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+        let alleles = record.alleles();
+
+        assert_eq!(record.pos(), 1002, "Position: last base of 1st CAG");
+        assert_eq!(alleles[0], b"GCAG", "REF: anchor G + motif CAG");
+        assert_eq!(alleles[1], b"G", "ALT: just anchor G");
+
+        let region_id = record.info(b"REGION_ID").string().unwrap();
+        assert_eq!(region_id.as_ref().unwrap()[0], b"chr1:1000-1021");
+    }
+
+    #[test]
+    fn test_inject_dummy_deletion_different_motifs() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+        let header_view = writer.header().clone();
+
+        let cases = vec![
+            ("A", 1000, 1020, 1000, b"AA" as &[u8], b"A" as &[u8]),
+            ("AT", 1100, 1120, 1101, b"TAT" as &[u8], b"T" as &[u8]),
+            ("CAG", 1200, 1221, 1202, b"GCAG" as &[u8], b"G" as &[u8]),
+            ("AAAG", 1300, 1320, 1303, b"GAAAG" as &[u8], b"G" as &[u8]),
+        ];
+
+        for (motif, start, end, _, _, _) in &cases {
+            let region = BedRegion {
+                chrom: "chr1".to_string(),
+                start: *start,
+                end: *end,
+                motif: motif.to_string(),
+            };
+            inject_dummy_deletion(&mut writer, &region, &header_view).unwrap();
+        }
+        drop(writer);
+
+        let mut reader = bcf::Reader::from_path(tmp.path()).unwrap();
+        for (motif, _, _, expected_pos, expected_ref, expected_alt) in &cases {
+            let record = reader.records().next().unwrap().unwrap();
+            let alleles = record.alleles();
+
+            assert_eq!(
+                record.pos(),
+                *expected_pos as i64,
+                "Position mismatch for motif {}",
+                motif
+            );
+            assert_eq!(
+                alleles[0], *expected_ref,
+                "REF mismatch for motif {}",
+                motif
+            );
+            assert_eq!(
+                alleles[1], *expected_alt,
+                "ALT mismatch for motif {}",
+                motif
+            );
+        }
+    }
+
+    #[test]
+    fn test_inject_dummy_deletion_chromosome_not_found() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut header = bcf::Header::new();
+        header.push_record(br"##fileformat=VCFv4.2");
+        header.push_record(br"##contig=<ID=chr1,length=1000000>");
+
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let region = BedRegion {
+            chrom: "chr2".to_string(), // Not in header!
+            start: 1000,
+            end: 1021,
+            motif: "CAG".to_string(),
+        };
+
+        let header_view = writer.header().clone();
+        let result = inject_dummy_deletion(&mut writer, &region, &header_view);
+
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("chr2"));
+    }
+
+    #[test]
+    fn test_inject_dummy_deletion_empty_motif() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let region = BedRegion {
+            chrom: "chr1".to_string(),
+            start: 1000,
+            end: 1020,
+            motif: "".to_string(), // Empty!
+        };
+
+        let header_view = writer.header().clone();
+        let result = inject_dummy_deletion(&mut writer, &region, &header_view);
+
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("motif"));
     }
 }
