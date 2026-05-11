@@ -230,6 +230,10 @@ pub(crate) enum Error {
     /* -------------------- Processing Errors ------------------------ */
     #[error("No chromosome match between BED and VCF files. Verify chromosome naming is consistent (e.g., 'chr1' vs '1')")]
     MsiVcfChromMismatch,
+    /* ======================= MSI: Preprocessing Errors ============= */
+    /* -------------------- VCF/BED Interaction ---------------------- */
+    #[error("Chromosome '{chrom}' from BED file not found in VCF header. Ensure chromosome naming is consistent (e.g., 'chr1' vs '1')")]
+    MsiChromosomeNotFound { chrom: String },
 }
 
 pub(crate) fn invalid_bcf_record(chrom: &str, pos: i64, msg: &str) -> Error {
