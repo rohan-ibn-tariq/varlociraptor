@@ -45,6 +45,16 @@ enum RepeatStatus {
     NA,
 }
 
+/// Variant in sliding window with accumulated region annotations.
+struct VariantInWindow {
+    /// The VCF record
+    record: bcf::Record,
+    /// Chromosome name
+    chrom: String,
+    /// Accumulated region IDs for MS indels (empty if not MS indel)
+    matching_regions: Vec<String>,
+}
+
 /* ================================================ */
 
 /* ======== Variant Analysis Functions ============ */
