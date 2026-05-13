@@ -11,8 +11,6 @@
 //! 1. @TODO: A brief overview of the MSI preprocessing workflow, e.g.:
 //!
 
-mod annotation;
-mod dummy_indels;
 mod intersection;
 
 use std::path::PathBuf;
