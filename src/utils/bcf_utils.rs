@@ -947,6 +947,53 @@ pub(crate) mod tests {
         reader.header().clone()
     }
 
+    /// Read the first record from a VCF/BCF file (without header).
+    ///
+    /// # Returns
+    /// Tuple of (reader, record) for testing
+    pub fn read_first_record_simple(path: &Path) -> (bcf::Reader, bcf::Record) {
+        let mut reader = bcf::Reader::from_path(path).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+        (reader, record)
+    }
+
+    /// Read the first record from a VCF/BCF file with header.
+    ///
+    /// Internally calls `read_first_record_simple` and clones the header.
+    ///
+    /// # Returns
+    /// Tuple of (reader, header, record) for testing
+    pub fn read_first_record(path: &Path) -> (bcf::Reader, HeaderView, bcf::Record) {
+        let (reader, record) = read_first_record_simple(path);
+        let header = reader.header().clone();
+        (reader, header, record)
+    }
+
+    /// Create a test VCF record with specified parameters.
+    ///
+    /// # Arguments
+    /// * `writer` - VCF writer
+    /// * `rid` - Reference ID (chromosome index in header)
+    /// * `pos` - Position (0-based)
+    /// * `ref_allele` - Reference allele (e.g., b"A")
+    /// * `alt_allele` - Alternate allele (e.g., b"T")
+    ///
+    /// # Returns
+    /// Configured VCF record ready for testing
+    pub fn create_test_record(
+        writer: &bcf::Writer,
+        rid: u32,
+        pos: i64,
+        ref_allele: &[u8],
+        alt_allele: &[u8],
+    ) -> bcf::Record {
+        let mut record = writer.empty_record();
+        record.set_rid(Some(rid));
+        record.set_pos(pos);
+        record.set_alleles(&[ref_allele, alt_allele]).unwrap();
+        record
+    }
+
     /* ==== BCF Extraction Function(s) tests ========= */
 
     #[test]
