@@ -206,53 +206,7 @@ fn should_include_variant(
 
 /* ================================================ */
 
-/* ============ Streaming Intersection ============ */
-
-/// Check if a variant's indel overlaps with a BED region.
-///
-/// Accounts for VCF anchor bases by calculating where the indel actually
-/// occurs (after the anchor), then checking if that position falls within
-/// the pure repeat region. Also filters out complex variants and SNVs.
-///
-/// # Algorithm
-/// 1. Get VCF position (0-based, points to anchor base)
-/// 2. Extract REF and ALT alleles for this specific alt_idx
-/// 3. Calculate actual indel position using genomics::calculate_indel_position
-///    - Returns None if: complex variant (both tails non-empty), SNV, or identical sequences
-///    - Returns Some(pos) if clean indel
-/// 4. Check if indel position is within BED region [start, end)
-///
-/// # Note:
-/// We perform point-based overlap, which means we only consider the variant position.
-///
-/// # Arguments
-/// * `record` - BCF record representing the variant
-/// * `region` - BED region to check overlap against
-/// * `alt_idx` - Index of the alternate allele to analyze (0-based into ALT array)
-///
-/// # Returns
-/// * `true` if clean indel position is within region
-/// * `false` if complex variant, SNV, or outside region
-///
-/// # Example
-/// VCF: POS=18630802 (0-based), REF=GCCT, ALT=G
-/// Anchor = G (1 base)
-/// Indel position = 18630802 + 1 = 18630803
-/// Region: [18630803, 18630833) (pure CCT repeat)
-/// Result: 18630803 >= 18630803 && 18630803 < 18630833 , TRUE
-#[inline]
-fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: usize) -> bool {
-    let vcf_pos = record.pos() as u64;
-    let alleles = record.alleles();
-    let ref_allele = alleles[0];
-    let alt_allele = alleles[alt_idx + 1]; // +1 because alleles[0] is REF
-
-    // Calculate where the indel occurs (None if complex variant/SNV)
-    match calculate_indel_position(vcf_pos, ref_allele, alt_allele) {
-        Some(indel_pos) => indel_pos >= region.start && indel_pos < region.end,
-        None => false,
-    }
-}
+/* =========== Writer Helper Functions ============ */
 
 /// Inject a dummy deletion for a region with no observed perfect indels.
 ///
@@ -315,6 +269,91 @@ fn inject_dummy_deletion(
     Ok(())
 }
 
+/// Write variant to output, with region annotations if present.
+///
+/// All variants are written to maintain complete VCF. Perfect MS indels
+/// receive `INFO/REGION_ID` annotation with comma-separated region IDs.
+///
+/// # Arguments
+/// * `writer` - VCF writer
+/// * `variant_info` - Variant with accumulated region annotations
+/// * `counter` - Counter for annotated MS indels (incremented if annotations present)
+fn write_variant(
+    writer: &mut Writer,
+    variant_info: VariantInWindow,
+    counter: &mut usize,
+) -> Result<()> {
+    let mut output_record = variant_info.record.clone();
+
+    // Clear any existing REGION_ID annotations from previous preprocessing.
+    output_record.clear_info_string(b"REGION_ID")?;
+
+    if !variant_info.matching_regions.is_empty() {
+        let region_id_bytes: Vec<&[u8]> = variant_info
+            .matching_regions
+            .iter()
+            .map(|s| s.as_bytes())
+            .collect();
+
+        output_record.push_info_string(b"REGION_ID", &region_id_bytes)?;
+        *counter += 1;
+    }
+
+    writer.write(&output_record)?;
+
+    Ok(())
+}
+
+/* ================================================ */
+
+/* ============ Streaming Intersection ============ */
+
+/// Check if a variant's indel overlaps with a BED region.
+///
+/// Accounts for VCF anchor bases by calculating where the indel actually
+/// occurs (after the anchor), then checking if that position falls within
+/// the pure repeat region. Also filters out complex variants and SNVs.
+///
+/// # Algorithm
+/// 1. Get VCF position (0-based, points to anchor base)
+/// 2. Extract REF and ALT alleles for this specific alt_idx
+/// 3. Calculate actual indel position using genomics::calculate_indel_position
+///    - Returns None if: complex variant (both tails non-empty), SNV, or identical sequences
+///    - Returns Some(pos) if clean indel
+/// 4. Check if indel position is within BED region [start, end)
+///
+/// # Note:
+/// We perform point-based overlap, which means we only consider the variant position.
+///
+/// # Arguments
+/// * `record` - BCF record representing the variant
+/// * `region` - BED region to check overlap against
+/// * `alt_idx` - Index of the alternate allele to analyze (0-based into ALT array)
+///
+/// # Returns
+/// * `true` if clean indel position is within region
+/// * `false` if complex variant, SNV, or outside region
+///
+/// # Example
+/// VCF: POS=18630802 (0-based), REF=GCCT, ALT=G
+/// Anchor = G (1 base)
+/// Indel position = 18630802 + 1 = 18630803
+/// Region: [18630803, 18630833) (pure CCT repeat)
+/// Result: 18630803 >= 18630803 && 18630803 < 18630833 , TRUE
+#[inline]
+fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: usize) -> bool {
+    let vcf_pos = record.pos() as u64;
+    let alleles = record.alleles();
+    let ref_allele = alleles[0];
+    let alt_allele = alleles[alt_idx + 1]; // +1 because alleles[0] is REF
+
+    // Calculate where the indel occurs (None if complex variant/SNV)
+    match calculate_indel_position(vcf_pos, ref_allele, alt_allele) {
+        Some(indel_pos) => indel_pos >= region.start && indel_pos < region.end,
+        None => false,
+    }
+}
+
 /* ================================================ */
 
 #[cfg(test)]
@@ -326,7 +365,8 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::bcf_utils::tests::{
-        create_multi_chromosome_vcf, create_test_vcf, TestVcfConfig,
+        create_multi_chromosome_vcf, create_test_record, create_test_vcf, read_first_record,
+        read_first_record_simple, TestVcfConfig,
     };
     use crate::utils::stats::TEST_EPSILON;
 
@@ -342,13 +382,14 @@ mod tests {
     // }
 
     /* ============ VCF Helpers  ======================= */
+
     /// Create minimal VCF header for dummy indel tests
     fn create_minimal_vcf_header() -> bcf::Header {
         let mut header = bcf::Header::new();
         header.push_record(br"##fileformat=VCFv4.2");
         header.push_record(br"##contig=<ID=chr1,length=1000000>");
         header.push_record(
-            br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID">"##,
+            br##"##INFO=<ID=REGION_ID,Number=.,Type=String,Description="BED region ID">"##,
         );
         header
     }
@@ -439,9 +480,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_, header, record) = read_first_record(tmp_vcf.path());
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
@@ -462,9 +501,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_, header, record) = read_first_record(tmp_vcf.path());
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
@@ -486,9 +523,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_, header, record) = read_first_record(tmp_vcf.path());
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
@@ -512,9 +547,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_reader, header, record) = read_first_record(tmp_vcf.path());
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
@@ -535,9 +568,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_, header, record) = read_first_record(tmp_vcf.path());
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
@@ -550,6 +581,183 @@ mod tests {
         assert!(!result); // Imperfect repeat should be filtered
     }
 
+    /* ====== write_variant tests ==================== */
+
+    #[test]
+    fn test_write_variant_with_annotation() {
+        let tmp: NamedTempFile = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let record = create_test_record(&writer, 0, 1000, b"ACAG", b"ACAGCAG");
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions: vec!["chr1:1000-1020".to_string()],
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        assert_eq!(counter, 1);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+
+        let region_id = record.info(b"REGION_ID").string().unwrap();
+        assert!(region_id.is_some());
+        assert_eq!(region_id.unwrap()[0], b"chr1:1000-1020");
+    }
+
+    #[test]
+    fn test_write_variant_with_multiple_regions() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let record = create_test_record(&writer, 0, 1015, b"ACAG", b"ACAGCAG");
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions: vec!["chr1:1000-1020".to_string(), "chr1:1010-1030".to_string()],
+        };
+
+        let mut counter = 1;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        assert_eq!(counter, 2);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+
+        let region_ids = record.info(b"REGION_ID").string().unwrap().unwrap();
+        assert_eq!(region_ids.len(), 2);
+        assert_eq!(region_ids[0], b"chr1:1000-1020");
+        assert_eq!(region_ids[1], b"chr1:1010-1030");
+    }
+
+    #[test]
+    fn test_write_variant_without_annotation() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let record = create_test_record(&writer, 0, 2000, b"A", b"T");
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions: Vec::new(),
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        assert_eq!(counter, 0);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+
+        let region_id = record.info(b"REGION_ID").string().unwrap();
+        assert!(region_id.is_none());
+
+        assert_eq!(record.pos(), 2000);
+        let alleles = record.alleles();
+        assert_eq!(alleles[0], b"A");
+        assert_eq!(alleles[1], b"T");
+    }
+
+    #[test]
+    fn test_write_variant_preserves_variant_data() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let record = create_test_record(&writer, 0, 5000, b"GCAG", b"G");
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions: vec!["chr1:5000-5020".to_string()],
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+
+        assert_eq!(record.pos(), 5000);
+
+        let alleles = record.alleles();
+        assert_eq!(alleles[0], b"GCAG");
+        assert_eq!(alleles[1], b"G");
+
+        let region_id = record.info(b"REGION_ID").string().unwrap().unwrap();
+        assert_eq!(region_id[0], b"chr1:5000-5020");
+    }
+
+    #[test]
+    fn test_write_variant_removes_existing_region_id_non_ms() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let mut record = create_test_record(&writer, 0, 2000, b"A", b"T");
+        record
+            .push_info_string(b"REGION_ID", &[b"old:value"])
+            .unwrap();
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions: Vec::new(),
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        assert_eq!(counter, 0);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+
+        let region_id = record.info(b"REGION_ID").string().unwrap();
+        assert!(region_id.is_none(), "REGION_ID should be removed");
+    }
+
+    #[test]
+    fn test_write_variant_replaces_existing_region_id_ms_indel() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let mut record = create_test_record(&writer, 0, 1000, b"ACAG", b"ACAGCAG");
+        record
+            .push_info_string(b"REGION_ID", &[b"old:value"])
+            .unwrap();
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions: vec!["chr1:1000-1020".to_string()],
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        assert_eq!(counter, 1);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+
+        let region_id = record.info(b"REGION_ID").string().unwrap().unwrap();
+        assert_eq!(region_id.len(), 1);
+        assert_eq!(region_id[0], b"chr1:1000-1020");
+    }
+
     /* ====== variant_overlaps_region tests ========== */
 
     #[test]
@@ -559,8 +767,8 @@ mod tests {
             alt_alleles: vec![b"AT"],
             ..Default::default()
         });
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let record = reader.records().next().unwrap().unwrap();
+
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // VCF POS=99 (0-based), REF=A, ALT=AT
         // Anchor = A (1 base)
@@ -611,8 +819,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // VCF POS=99, REF=TGCCT, ALT=TG
         // Anchor = TG (2 bases)
@@ -651,8 +858,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // Complex variant returns None: should NOT overlap
         assert!(!variant_overlaps_region(
@@ -675,8 +881,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // SNV returns None: should NOT overlap
         assert!(!variant_overlaps_region(
@@ -699,8 +904,7 @@ mod tests {
             ..Default::default()
         });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let record = reader.records().next().unwrap().unwrap();
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // VCF POS=99
         // ALT1: GCCT -> G, anchor=1, indel_pos=100
