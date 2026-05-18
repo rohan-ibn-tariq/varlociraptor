@@ -43,6 +43,7 @@
 //! - `Empty` - No data found
 //! - `Failed` - Operation failure
 //! - `Mismatch` - Data inconsistency
+//! -  NoValidRegions - No valid regions
 //!
 //! ## Examples:
 //! - `BedFileInvalid` - Invalid BED file path
@@ -66,6 +67,8 @@ pub(crate) enum Error {
     BedFileInvalid { path: PathBuf },
     #[error("BED file is empty (no microsatellite loci found)")]
     BedFileEmpty,
+    #[error("BED file contains no valid regions")]
+    BedFileNoValidRegions,
     #[error("invalid BED record at {chrom}:{pos}: {msg}")]
     BedRecordInvalid {
         chrom: String,
