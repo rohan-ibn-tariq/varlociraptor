@@ -9,7 +9,8 @@
 //! Expected BED format: chrom, start, end, name
 //! where name follows the pattern `<count>x<motif>` (e.g., "15xCAG")
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use bio::io::bed;
@@ -160,6 +161,44 @@ pub(crate) fn parse_bed_record(record: &bed::Record) -> Result<BedRegion> {
     })
 }
 
+/// Collect unique chromosome names from BED file.
+///
+/// Performs a fast scan of the BED file to identify all chromosomes
+/// present in the bed file.
+///
+/// # Algorithm
+/// Reads each BED record, extracts chromosome name, and collects
+/// unique values in a HashSet. Invalid BED records are rejected
+/// via `parse_bed_record` validation.
+///
+/// # Arguments
+/// * `bed_path` - Path to BED file with microsatellite regions
+///
+/// # Returns
+/// * `Ok(HashSet<String>)` - Set of unique chromosome names from BED
+/// * `Err` if BED file cannot be read or contains invalid records
+///
+/// # Example
+/// assert!(collect_bed_chromosomes(Path::new("regions.bed")).is_ok().size() == 3);
+pub(crate) fn collect_bed_chromosomes(bed_path: &Path) -> Result<HashSet<String>> {
+    let mut bed_reader = bed::Reader::from_file(bed_path)
+        .context("Failed to open BED file for chromosome collection")?;
+
+    let mut chroms = HashSet::new();
+
+    for (line_num, bed_result) in bed_reader.records().enumerate() {
+        let bed_record = bed_result.map_err(|e| Error::BedRecordReadFailed {
+            line: line_num + 1,
+            details: e.to_string(),
+        })?;
+
+        let region = parse_bed_record(&bed_record)?;
+        chroms.insert(region.chrom);
+    }
+
+    Ok(chroms)
+}
+
 /// Validate BED file by checking first record.
 ///
 /// Performs quick sanity check to ensure BED file is readable
@@ -176,7 +215,7 @@ pub(crate) fn parse_bed_record(record: &bed::Record) -> Result<BedRegion> {
 ///
 /// # Example
 /// assert!(validate_bed_file(&path).is_ok());
-pub(crate) fn validate_bed_file(bed_path: &PathBuf) -> Result<()> {
+pub(crate) fn validate_bed_file(bed_path: &Path) -> Result<()> {
     info!("Validating BED file: {}", bed_path.display());
 
     let mut bed_reader = bed::Reader::from_file(bed_path).context("Failed to open BED file")?;
@@ -325,6 +364,55 @@ mod tests {
         let record = bed_record_from_str("\t100\t200");
         assert!(parse_bed_record(&record).is_err());
     }
+
+    /* ===== collect_bed_chromosomes tests =========== */
+
+    #[test]
+    fn test_collect_bed_chromosomes_single_chromosome() {
+        let tmp = NamedTempFile::new().unwrap();
+        writeln!(tmp.as_file(), "chr1\t1000\t1021\t3xCAG").unwrap();
+        writeln!(tmp.as_file(), "chr1\t2000\t2020\t2xAT").unwrap();
+        writeln!(tmp.as_file(), "chr1\t3000\t3021\t3xAAA").unwrap();
+
+        let chroms = collect_bed_chromosomes(tmp.path()).unwrap();
+
+        assert_eq!(chroms.len(), 1);
+        assert!(chroms.contains("chr1"));
+    }
+
+    #[test]
+    fn test_collect_bed_chromosomes_multiple_chromosomes() {
+        let tmp = NamedTempFile::new().unwrap();
+        writeln!(tmp.as_file(), "chr1\t1000\t1021\t3xCAG").unwrap();
+        writeln!(tmp.as_file(), "chr2\t2000\t2020\t2xAT").unwrap();
+        writeln!(tmp.as_file(), "chr3\t3000\t3021\t3xAAA").unwrap();
+        writeln!(tmp.as_file(), "chr1\t4000\t4021\t3xCAG").unwrap(); // Duplicate chr1
+        writeln!(tmp.as_file(), "chr2\t5000\t5020\t2xAT").unwrap(); // Duplicate chr2
+
+        let chroms = collect_bed_chromosomes(tmp.path()).unwrap();
+
+        assert_eq!(chroms.len(), 3, "Should have 3 unique chromosomes");
+        assert!(chroms.contains("chr1"));
+        assert!(chroms.contains("chr2"));
+        assert!(chroms.contains("chr3"));
+    }
+
+    #[test]
+    fn test_collect_bed_chromosomes_empty_file() {
+        let tmp = NamedTempFile::new().unwrap();
+
+        let chroms = collect_bed_chromosomes(tmp.path()).unwrap();
+
+        assert_eq!(chroms.len(), 0, "Empty file should return empty set");
+    }
+
+    #[test]
+    fn test_collect_bed_chromosomes_invalid_file() {
+        let result = collect_bed_chromosomes(Path::new("/nonexistent/file.bed"));
+
+        assert!(result.is_err(), "Should error on non-existent file");
+    }
+
     /* ===== validate_bed_file tests ================= */
 
     #[test]
