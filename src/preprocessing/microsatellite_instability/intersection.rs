@@ -32,7 +32,7 @@ use crate::utils::bcf_utils::{
 use crate::utils::genomics::{
     calculate_anchor_length, calculate_indel_position, is_clean_indel, is_indel,
 };
-use crate::utils::ms_bed::{parse_bed_record, BedRegion};
+use crate::utils::ms_bed::{collect_bed_chromosomes, parse_bed_record, BedRegion};
 
 /* ============ Data Structures =================== */
 
@@ -225,12 +225,10 @@ fn should_include_variant(
 ///
 /// # Example
 /// assert!(inject_dummy_deletion(&mut writer, &region, &header).is_ok());
-fn inject_dummy_deletion(
-    writer: &mut Writer,
-    region: &BedRegion,
-    header: &HeaderView,
-) -> Result<()> {
+fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> Result<()> {
     let mut record = writer.empty_record();
+
+    let header = writer.header();
 
     let rid =
         header
@@ -352,6 +350,255 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
         Some(indel_pos) => indel_pos >= region.start && indel_pos < region.end,
         None => false,
     }
+}
+
+/// Streams through sorted VCF variants and BED regions to identify perfect microsatellite
+/// indels. Annotates matching variants with `INFO/REGION_ID` field containing
+/// comma-separated region identifiers for all overlapping regions. Injects dummy
+/// deletions for regions with no observed perfect indels.
+///
+/// # Algorithm
+/// 1. Pre-scan BED file to collect all chromosomes, add missing contigs to output VCF header
+/// 2. Stream through BED regions sequentially (bounded memory usage)
+/// 3. Maintain sliding window of VCF variants around current region
+/// 4. For each BED region:
+///    - Remove and write variants before region (past window boundary)
+///    - Load variants until past region end
+///    - Accumulate REGION_ID annotations for overlapping perfect MS indels
+///    - Inject dummy deletion if no perfect indel found
+/// 5. Write all remaining variants after BED exhausted
+///
+/// # Output Behavior
+/// - All input variants are written to output (preserves complete VCF)
+/// - Perfect MS indels receive `INFO/REGION_ID` annotation with overlapping region IDs
+/// - Non-MS variants are written unchanged (no annotation)
+/// - Dummy indels are injected for regions without observed perfect indels
+///
+/// # Perfect MS Indel Criteria
+/// - Must be a clean indel (insertion or deletion, not complex)
+/// - Changed sequence must be exact tandem repeats of the region's motif
+/// - Must overlap the BED region's coordinates (anchor-aware positioning)
+///
+/// # Arguments
+/// * `vcf_path` - Path to candidate VCF file (must contain indels)
+/// * `bed_path` - Path to microsatellite regions BED file (format: chrom, start, end, NxMOTIF)
+/// * `output` - Output path (None = stdout)
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if fails
+///
+/// # Example
+/// assert!(process_and_annotate(Path::new("candidates.vcf"), Path::new("ms_regions.bed"), Some(Path::new("output.vcf"))).is_ok());
+pub(super) fn process_and_annotate(
+    vcf_path: &Path,
+    bed_path: &Path,
+    output: Option<&Path>,
+) -> Result<()> {
+    /* ========== Setup ========== */
+    let mut vcf = bcf::Reader::from_path(vcf_path).context("Failed to open VCF file")?;
+
+    let header_view = vcf.header().clone();
+    let mut header = bcf::Header::from_template(&header_view);
+
+    // Add REGION_ID info field
+    header.push_record(
+        br##"##INFO=<ID=REGION_ID,Number=.,Type=String,Description="Comma-separated BED region IDs for MS indels">"##
+    );
+
+    /* ===== Collect BED chromosomes and add missing contigs ===== */
+    let bed_chroms = collect_bed_chromosomes(bed_path)?;
+
+    if bed_chroms.is_empty() {
+        return Err(Error::BedFileNoValidRegions.into());
+    }
+
+    for chrom in &bed_chroms {
+        if header_view.name2rid(chrom.as_bytes()).is_err() {
+            let contig_line = format!("##contig=<ID={}>", chrom);
+            header.push_record(contig_line.as_bytes());
+            debug!("Added missing contig to VCF header: {}", chrom);
+        }
+    }
+
+    /* ===== Create writer with complete header ===== */
+    let mut writer = match output {
+        Some(path) => Writer::from_path(path, &header, false, bcf::Format::Vcf)?,
+        None => Writer::from_stdout(&header, false, bcf::Format::Vcf)?,
+    };
+
+    /* ===== Main processing loop ===== */
+    let mut bed_reader = bed::Reader::from_file(bed_path).context("Failed to open BED file")?;
+
+    let mut total_regions = 0;
+    let mut skipped_invalid_regions = 0;
+    let mut total_annotated_indels = 0;
+    let mut total_dummy_indels = 0;
+    let mut variant_window: VecDeque<VariantInWindow> = VecDeque::new();
+    let mut seen_any_chrom_overlap = false;
+
+    /* ========== Main Loop: Process each BED region ========== */
+    for (line_num, bed_result) in bed_reader.records().enumerate() {
+        let bed_record = bed_result.map_err(|e| Error::BedRecordReadFailed {
+            line: line_num + 1,
+            details: e.to_string(),
+        })?;
+        let region = parse_bed_record(&bed_record)?;
+
+        total_regions += 1;
+
+        if !region.is_valid_motif() {
+            skipped_invalid_regions += 1;
+            debug!(
+                "Skipping region {} with invalid motif length {}",
+                region.region_id(),
+                region.motif_length(),
+            );
+            continue;
+        }
+
+        /* ===== STEP 1: Remove and write variants before this region ===== */
+        while let Some(variant_info) = variant_window.front() {
+            if variant_info.chrom < region.chrom {
+                let variant_info = variant_window.pop_front().unwrap();
+                write_variant(&mut writer, variant_info, &mut total_annotated_indels)?;
+            } else if variant_info.chrom == region.chrom {
+                let pos = variant_info.record.pos() as u64;
+                let alleles = variant_info.record.alleles();
+                let ref_allele = alleles[0];
+
+                let max_indel_pos = (1..alleles.len())
+                    .filter_map(|alt_idx| {
+                        let alt_allele = alleles[alt_idx];
+                        calculate_indel_position(pos, ref_allele, alt_allele)
+                    })
+                    .max()
+                    .unwrap_or(pos);
+
+                if max_indel_pos < region.start {
+                    let variant_info = variant_window.pop_front().unwrap();
+                    write_variant(&mut writer, variant_info, &mut total_annotated_indels)?;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        /* ===== STEP 2: Load variants until we pass region ===== */
+        loop {
+            if let Some(variant_info) = variant_window.back() {
+                if variant_info.chrom > region.chrom {
+                    break;
+                } else if variant_info.chrom == region.chrom {
+                    let pos = variant_info.record.pos() as u64;
+                    let alleles = variant_info.record.alleles();
+                    let ref_allele = alleles[0];
+
+                    let min_indel_pos = (1..alleles.len())
+                        .filter_map(|alt_idx| {
+                            let alt_allele = alleles[alt_idx];
+                            calculate_indel_position(pos, ref_allele, alt_allele)
+                        })
+                        .min()
+                        .unwrap_or(pos);
+
+                    if min_indel_pos >= region.end {
+                        break;
+                    }
+                }
+            }
+
+            let mut next_record = vcf.empty_record();
+            match vcf.read(&mut next_record) {
+                None => break,
+                Some(Err(e)) => {
+                    return Err(Error::VcfRecordReadFailed {
+                        details: e.to_string(),
+                    }
+                    .into());
+                }
+                Some(Ok(())) => {
+                    let chrom = get_chrom(&next_record, &header_view)?;
+                    let pos = next_record.pos();
+
+                    if pos < 0 {
+                        debug!(
+                            "Skipping malformed VCF record with invalid position: {}:{}",
+                            chrom,
+                            pos + 1
+                        );
+                        continue;
+                    }
+
+                    variant_window.push_back(VariantInWindow {
+                        record: next_record,
+                        chrom,
+                        matching_regions: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        /* ===== STEP 3: Accumulate region IDs for overlapping variants ===== */
+        let mut found_perfect_indel_in_region = false;
+
+        for variant_info in &mut variant_window {
+            if variant_info.chrom != region.chrom {
+                continue;
+            }
+
+            if !seen_any_chrom_overlap {
+                seen_any_chrom_overlap = true;
+            }
+
+            let allele_count = variant_info.record.allele_count() as usize;
+            for alt_idx in 0..(allele_count - 1) {
+                if !variant_overlaps_region(&variant_info.record, &region, alt_idx) {
+                    continue;
+                }
+
+                if should_include_variant(&variant_info.record, &header_view, alt_idx, &region)? {
+                    let region_id = region.region_id();
+
+                    if !variant_info.matching_regions.contains(&region_id) {
+                        variant_info.matching_regions.push(region_id.clone());
+                    }
+
+                    found_perfect_indel_in_region = true;
+                    break;
+                }
+            }
+        }
+
+        /* ===== Inject dummy indel if no perfect indel found ===== */
+        if !found_perfect_indel_in_region {
+            inject_dummy_deletion(&mut writer, &region)?;
+            total_dummy_indels += 1;
+        }
+    }
+
+    /* ========== Write remaining variants in window ========== */
+    while let Some(variant_info) = variant_window.pop_front() {
+        write_variant(&mut writer, variant_info, &mut total_annotated_indels)?;
+    }
+
+    /* ========== Finalization ========== */
+    if !seen_any_chrom_overlap {
+        return Err(Error::MsiVcfChromMismatch.into());
+    }
+
+    info!("Preprocessing complete:");
+    info!("  Total BED regions: {}", total_regions);
+    info!(
+        "  Valid regions (1-6bp motif): {}",
+        total_regions - skipped_invalid_regions
+    );
+    info!("  Annotated MS indels: {}", total_annotated_indels);
+    info!("  Dummy indels injected: {}", total_dummy_indels);
+
+    Ok(())
 }
 
 /* ================================================ */
@@ -952,8 +1199,7 @@ mod tests {
             motif: "CAG".to_string(),
         };
 
-        let header_view = writer.header().clone();
-        inject_dummy_deletion(&mut writer, &region, &header_view).unwrap();
+        inject_dummy_deletion(&mut writer, &region).unwrap();
         drop(writer);
 
         let mut reader = bcf::Reader::from_path(tmp.path()).unwrap();
@@ -973,7 +1219,6 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         let header = create_minimal_vcf_header();
         let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
-        let header_view = writer.header().clone();
 
         let cases = vec![
             ("A", 1000, 1020, 1000, b"AA" as &[u8], b"A" as &[u8]),
@@ -989,7 +1234,7 @@ mod tests {
                 end: *end,
                 motif: motif.to_string(),
             };
-            inject_dummy_deletion(&mut writer, &region, &header_view).unwrap();
+            inject_dummy_deletion(&mut writer, &region).unwrap();
         }
         drop(writer);
 
@@ -1033,8 +1278,7 @@ mod tests {
             motif: "CAG".to_string(),
         };
 
-        let header_view = writer.header().clone();
-        let result = inject_dummy_deletion(&mut writer, &region, &header_view);
+        let result = inject_dummy_deletion(&mut writer, &region);
 
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("chr2"));
@@ -1053,8 +1297,7 @@ mod tests {
             motif: "".to_string(), // Empty!
         };
 
-        let header_view = writer.header().clone();
-        let result = inject_dummy_deletion(&mut writer, &region, &header_view);
+        let result = inject_dummy_deletion(&mut writer, &region);
 
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("motif"));
