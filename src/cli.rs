@@ -469,7 +469,7 @@ pub enum PreprocessKind {
             long,
             short = "o",
             parse(from_os_str),
-            help = "Output file (VCF, BCF, or VCF.GZ; if omitted, writes BCF to STDOUT)"
+            help = "Output file (VCF, BCF, or VCF.GZ; if omitted, writes uncompressed VCF to STDOUT)"
         )]
         output: Option<PathBuf>,
     },
