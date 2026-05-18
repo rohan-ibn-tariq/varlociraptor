@@ -55,6 +55,19 @@ struct VariantInWindow {
     matching_regions: Vec<String>,
 }
 
+/// Statistics from MSI preprocessing.
+#[derive(Debug)]
+pub(super) struct PreprocessingStats {
+    /// Total number of BED regions processed (including invalid motifs).
+    pub total_regions: usize,
+    /// Number of valid BED regions with motif length 1-6 bp.
+    pub valid_regions: usize,
+    /// Number of indels that were annotated with MS region information.
+    pub annotated_indels: usize,
+    /// Number of dummy indels injected for MS regions without variants.
+    pub dummy_indels: usize,
+}
+
 /* ================================================ */
 
 /* ======== Variant Analysis Functions ============ */
@@ -385,47 +398,18 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// * `output` - Output path (None = stdout)
 ///
 /// # Returns
-/// * `Ok(())` on success
+/// * `Ok(PreprocessingStats)` on success
 /// * `Err` if fails
 ///
 /// # Example
 /// assert!(process_and_annotate(Path::new("candidates.vcf"), Path::new("ms_regions.bed"), Some(Path::new("output.vcf"))).is_ok());
 pub(super) fn process_and_annotate(
-    vcf_path: &Path,
+    input_vcf: &mut bcf::Reader,
     bed_path: &Path,
-    output: Option<&Path>,
-) -> Result<()> {
+    mut writer: &mut bcf::Writer,
+) -> Result<PreprocessingStats> {
     /* ========== Setup ========== */
-    let mut vcf = bcf::Reader::from_path(vcf_path).context("Failed to open VCF file")?;
-
-    let header_view = vcf.header().clone();
-    let mut header = bcf::Header::from_template(&header_view);
-
-    // Add REGION_ID info field
-    header.push_record(
-        br##"##INFO=<ID=REGION_ID,Number=.,Type=String,Description="Comma-separated BED region IDs for MS indels">"##
-    );
-
-    /* ===== Collect BED chromosomes and add missing contigs ===== */
-    let bed_chroms = collect_bed_chromosomes(bed_path)?;
-
-    if bed_chroms.is_empty() {
-        return Err(Error::BedFileNoValidRegions.into());
-    }
-
-    for chrom in &bed_chroms {
-        if header_view.name2rid(chrom.as_bytes()).is_err() {
-            let contig_line = format!("##contig=<ID={}>", chrom);
-            header.push_record(contig_line.as_bytes());
-            debug!("Added missing contig to VCF header: {}", chrom);
-        }
-    }
-
-    /* ===== Create writer with complete header ===== */
-    let mut writer = match output {
-        Some(path) => Writer::from_path(path, &header, false, bcf::Format::Vcf)?,
-        None => Writer::from_stdout(&header, false, bcf::Format::Vcf)?,
-    };
+    let header_view = input_vcf.header().clone();
 
     /* ===== Main processing loop ===== */
     let mut bed_reader = bed::Reader::from_file(bed_path).context("Failed to open BED file")?;
@@ -510,8 +494,8 @@ pub(super) fn process_and_annotate(
                 }
             }
 
-            let mut next_record = vcf.empty_record();
-            match vcf.read(&mut next_record) {
+            let mut next_record = input_vcf.empty_record();
+            match input_vcf.read(&mut next_record) {
                 None => break,
                 Some(Err(e)) => {
                     return Err(Error::VcfRecordReadFailed {
@@ -589,16 +573,12 @@ pub(super) fn process_and_annotate(
         return Err(Error::MsiVcfChromMismatch.into());
     }
 
-    info!("Preprocessing complete:");
-    info!("  Total BED regions: {}", total_regions);
-    info!(
-        "  Valid regions (1-6bp motif): {}",
-        total_regions - skipped_invalid_regions
-    );
-    info!("  Annotated MS indels: {}", total_annotated_indels);
-    info!("  Dummy indels injected: {}", total_dummy_indels);
-
-    Ok(())
+    Ok(PreprocessingStats {
+        total_regions,
+        valid_regions: total_regions - skipped_invalid_regions,
+        annotated_indels: total_annotated_indels,
+        dummy_indels: total_dummy_indels,
+    })
 }
 
 /* ================================================ */
