@@ -32,7 +32,7 @@ use crate::utils::bcf_utils::{
 use crate::utils::genomics::{
     calculate_anchor_length, calculate_indel_position, is_clean_indel, is_indel,
 };
-use crate::utils::ms_bed::{collect_bed_chromosomes, parse_bed_record, BedRegion};
+use crate::utils::ms_bed::{parse_bed_record, BedRegion};
 
 /* ============ Data Structures =================== */
 
