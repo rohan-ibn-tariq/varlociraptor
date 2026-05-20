@@ -1,10 +1,10 @@
 //! header.rs
 //!
 //! Output VCF header preparation for MSI preprocessing.
-//! 
-//! This module provides: 
+//!
+//! This module provides:
 //! 1. `prepare_header` function to create a modified VCF header for MSI preprocessing output.
-//! 
+//!
 
 use std::path::Path;
 
@@ -59,7 +59,6 @@ pub(super) fn prepare_header(
     Ok(header)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,7 +80,7 @@ mod tests {
     }
 
     /// Helper: Create test BED file with given chromosomes
-    /// NOTE: Each region is 100-121 with a 7xCAG motif 
+    /// NOTE: Each region is 100-121 with a 7xCAG motif
     /// (inappropriate for MSI but good for testing header prep)
     fn create_test_bed(chroms: &[&str]) -> NamedTempFile {
         let mut tmp = NamedTempFile::new().unwrap();
@@ -104,10 +103,10 @@ mod tests {
     fn test_prepare_header_adds_region_id_field() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let bed_file = create_test_bed(&["chr1"]);
-        
+
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
         let result = prepare_header(reader.header(), bed_file.path()).unwrap();
-        
+
         let content = header_to_string(&result);
         assert!(content.contains("ID=REGION_ID"));
     }
@@ -116,10 +115,10 @@ mod tests {
     fn test_prepare_header_adds_missing_contigs() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let bed_file = create_test_bed(&["chr1", "chr2"]);
-        
+
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
         let result = prepare_header(reader.header(), bed_file.path()).unwrap();
-        
+
         let content = header_to_string(&result);
         assert!(content.contains("ID=REGION_ID"));
         assert!(content.contains("contig=<ID=chr2>"));
@@ -129,10 +128,10 @@ mod tests {
     fn test_prepare_header_errors_on_empty_bed() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let empty_bed = NamedTempFile::new().unwrap();
-        
+
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
         let result = prepare_header(reader.header(), empty_bed.path());
-        
+
         assert!(result.is_err());
     }
 
@@ -140,10 +139,10 @@ mod tests {
     fn test_prepare_header_preserves_existing_contigs() {
         let vcf_file = create_test_vcf(&["chr1", "chr2"]);
         let bed_file = create_test_bed(&["chr1"]);
-        
+
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
         let result = prepare_header(reader.header(), bed_file.path()).unwrap();
-        
+
         let content = header_to_string(&result);
         // chr2 should still be in header (not removed)
         assert!(content.contains("contig=<ID=chr1>"));
@@ -154,10 +153,10 @@ mod tests {
     fn test_prepare_header_no_duplicate_contigs() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let bed_file = create_test_bed(&["chr1"]);
-        
+
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
         let result = prepare_header(reader.header(), bed_file.path()).unwrap();
-        
+
         let content = header_to_string(&result);
 
         let count = content.matches("contig=<ID=chr1>").count();
