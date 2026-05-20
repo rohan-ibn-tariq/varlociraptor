@@ -18,7 +18,6 @@ use crate::utils::bcf_utils::{
 use crate::utils::genomics::{calculate_anchor_length, is_clean_indel, is_indel};
 use crate::utils::ms_bed::BedRegion;
 
-
 /* ============ Data Structures =================== */
 
 /// Classification of indel repeat pattern relative to microsatellite motif.
@@ -177,13 +176,11 @@ pub(super) fn should_include_variant(
     Ok(repeat_status == RepeatStatus::Perfect)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::utils::bcf_utils::tests::{create_test_vcf, read_first_record, TestVcfConfig};
     use crate::utils::ms_bed::BedRegion;
-
 
     /* ========== is_perfect_repeat tests ============ */
 
