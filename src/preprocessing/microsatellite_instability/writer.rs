@@ -3,6 +3,10 @@
 //! VCF writing operations for MSI preprocessing.
 //!
 //! This module provides:
+//! 1. `VariantInWindow` - Structure for variants with accumulated region annotations
+//! 2. `inject_dummy_deletion` - Creates dummy indels for regions without perfect repeats
+//! 3. `write_variant` - Writes variants with REGION_ID annotations if applicable
+//! 4.  Unit tests for both (2,3) functions, covering typical and edge cases
 //!
 
 use anyhow::Result;
@@ -23,7 +27,7 @@ pub(super) struct VariantInWindow {
     pub matching_regions: Vec<String>,
 }
 
-/* ================================================ */
+/* ============ Functions ========================= */
 
 /// Inject a dummy deletion for a region with no observed perfect indels.
 ///
@@ -119,12 +123,13 @@ pub(super) fn write_variant(
     Ok(())
 }
 
+/* =============== Tests ========================== */
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
-    use rust_htslib::bcf::{self, Format, Read};
+    use rust_htslib::bcf::{self, Read};
     use tempfile::NamedTempFile;
 
     use crate::utils::bcf_utils::tests::{create_test_record, read_first_record_simple};
