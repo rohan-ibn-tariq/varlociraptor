@@ -48,6 +48,20 @@ pub(super) struct PreprocessingStats {
     pub dummy_indels: usize,
 }
 
+impl PreprocessingStats {
+    /// Log a summary of the preprocessing statistics.
+    /// - Total BED regions processed
+    /// - Valid regions (1-6 bp motif)
+    /// - Annotated MS indels
+    /// - Dummy indels injected
+    pub fn log_stats(&self) {
+        info!("  Total BED regions: {}", self.total_regions);
+        info!("  Valid regions (1-6bp motif): {}", self.valid_regions);
+        info!("  Annotated MS indels: {}", self.annotated_indels);
+        info!("  Dummy indels injected: {}", self.dummy_indels);
+    }
+}
+
 /* ================================================ */
 
 /* ============ Streaming Intersection ============ */

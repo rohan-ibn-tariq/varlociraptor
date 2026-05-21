@@ -91,6 +91,22 @@ impl PreprocessMSIConfig {
             }
         }
     }
+
+    /// Log configuration details:
+    ///   - Input file paths
+    ///   - Output file path or STDOUT
+    pub fn log_config(&self) {
+        info!("Input files:");
+        info!("BED file: {}", self.microsatellite_bed.display());
+        info!("VCF/BCF file: {}", self.candidate_vcf.display());
+
+        if let Some(ref output) = self.output {
+            info!("Output: {}", output.display());
+        } else {
+            info!("Output: STDOUT (VCF format)");
+        }
+    }
+
 }
 
 /* ================================================ */
@@ -102,16 +118,7 @@ pub fn preprocess_ms_candidates(config: PreprocessMSIConfig) -> Result<()> {
     info!("----------------------------------------------");
     info!("Step 1: Config Stats");
     info!("----------------------------------------------");
-
-    info!("Input files:");
-    info!("BED file: {}", config.microsatellite_bed.display());
-    info!("VCF/BCF file: {}", config.candidate_vcf.display());
-
-    if let Some(ref output) = config.output {
-        info!("Output: {}", output.display());
-    } else {
-        info!("Output: STDOUT (VCF format)");
-    }
+    config.log_config();
 
     info!("----------------------------------------------");
     info!("Step 2: Streaming Intersection & Output Generation");
@@ -143,11 +150,7 @@ pub fn preprocess_ms_candidates(config: PreprocessMSIConfig) -> Result<()> {
     info!("----------------------------------------------");
     info!("Step 3(Final): Logging Final Stats");
     info!("----------------------------------------------");
-    info!("  Total BED regions: {}", stats.total_regions);
-    info!("  Valid regions (1-6bp motif): {}", stats.valid_regions);
-    info!("  Annotated MS indels: {}", stats.annotated_indels);
-    info!("  Dummy indels injected: {}", stats.dummy_indels);
-
+    stats.log_stats();
     info!("==============================================");
     info!("Preprocessing MSI complete");
     info!("==============================================");
