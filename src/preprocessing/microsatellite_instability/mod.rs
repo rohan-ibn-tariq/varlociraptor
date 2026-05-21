@@ -16,14 +16,13 @@ mod intersection;
 mod variant_analysis;
 mod writer;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use log::info;
 use rust_htslib::bcf::{self, Format, Read};
 
 use crate::cli::{validate_bed_file, validate_vcf_file};
-use crate::errors::Error;
 use crate::utils::bcf_utils::validate_vcf_file as validate_ms_vcf_file;
 use crate::utils::ms_bed::validate_bed_file as validate_ms_bed_file;
 
@@ -161,7 +160,6 @@ pub fn preprocess_ms_candidates(config: PreprocessMSIConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     use rust_htslib::bcf::Format;
 
