@@ -104,6 +104,8 @@ pub(super) fn write_variant(
 ) -> Result<()> {
     let mut output_record = variant_info.record.clone();
 
+    writer.translate(&mut output_record);
+
     // Clear any existing REGION_ID annotations from previous preprocessing.
     output_record.clear_info_string(b"REGION_ID")?;
 
