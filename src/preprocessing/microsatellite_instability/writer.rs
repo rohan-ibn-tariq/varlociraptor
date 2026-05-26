@@ -13,6 +13,7 @@ use anyhow::Result;
 use rust_htslib::bcf::{self, Writer};
 
 use crate::errors::Error;
+use crate::utils::bcf_utils::add_missing_format_fields;
 use crate::utils::ms_bed::BedRegion;
 
 /* ============ Data Structures =================== */
@@ -82,6 +83,8 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
 
     let region_id = region.region_id();
     record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
+
+    add_missing_format_fields(&mut record, writer.header())?;
 
     writer.write(&record)?;
 
