@@ -106,7 +106,6 @@ impl PreprocessMSIConfig {
             info!("Output: STDOUT (VCF format)");
         }
     }
-
 }
 
 /* ================================================ */
