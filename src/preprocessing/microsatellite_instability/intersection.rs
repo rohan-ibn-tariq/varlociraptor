@@ -1,21 +1,23 @@
 //! intersection.rs
 //!
-//! Streaming intersection alongside with dummy indel
-//! injection and variant annotation for MSI detection.
+//! Streaming intersection of BED regions with VCF variants.
 //!
 //! This module provides:
-//! 1. Streaming intersection of BED regions with VCF variants;
-//! 2. Perfect microsatellite repeat detection;
-//! 3. Variant filtering;
-//! 4. Dummy indel injection for MS regions without variants;
-//! 5. MS region annotation (INFO/MS_REGION).
+//! 1. `variant_overlaps_region` function to determine if a variant's indel overlaps a BED region,
+//!     accounting for VCF anchor bases and filtering out complex variants and SNVs.
+//! 2. `process_and_annotate` function as a core streaming algorithm for MSI preprocessing:
+//!     - Maintains a sliding window of VCF variants for memory efficiency
+//!     - Coordinates variant analysis (via variant_analysis module)
+//!     - Coordinates VCF output (via writer module)
+//!     - Returns processing statistics
 //!
-//! The streaming approach processes BED regions sequentially while maintaining
-//! a sliding window of VCF variants, enabling memory-efficient analysis of
-//! large datasets.
+//!     The streaming approach processes BED regions sequentially while maintaining
+//!     a sliding window of VCF variants, enabling memory-efficient analysis of
+//!     large datasets.
 //!
 //! Note: This module assumes that both the BED and VCF files are sorted by chromosome
 //! (lexicographically) and position, which is a common requirement for genomic analyses.
+//!
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -62,9 +64,7 @@ impl PreprocessingStats {
     }
 }
 
-/* ================================================ */
-
-/* ============ Streaming Intersection ============ */
+/* ============ Functions =========================== */
 
 /// Check if a variant's indel overlaps with a BED region.
 ///
@@ -98,6 +98,7 @@ impl PreprocessingStats {
 /// Indel position = 18630802 + 1 = 18630803
 /// Region: [18630803, 18630833) (pure CCT repeat)
 /// Result: 18630803 >= 18630803 && 18630803 < 18630833 , TRUE
+/// assert!(variant_overlaps_region(&record, &region, 0));
 #[inline]
 fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: usize) -> bool {
     let vcf_pos = record.pos() as u64;
@@ -118,15 +119,15 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// deletions for regions with no observed perfect indels.
 ///
 /// # Algorithm
-/// 1. Pre-scan BED file to collect all chromosomes, add missing contigs to output VCF header
-/// 2. Stream through BED regions sequentially (bounded memory usage)
-/// 3. Maintain sliding window of VCF variants around current region
-/// 4. For each BED region:
+/// 1. Stream through BED regions sequentially (bounded memory usage)
+/// 2. Maintain sliding window of VCF variants around current region
+/// 3. For each BED region:
 ///    - Remove and write variants before region (past window boundary)
 ///    - Load variants until past region end
+///    - Check each variant for perfect repeat status (via variant_analysis::should_include_variant)
 ///    - Accumulate REGION_ID annotations for overlapping perfect MS indels
-///    - Inject dummy deletion if no perfect indel found
-/// 5. Write all remaining variants after BED exhausted
+///    - Inject dummy deletion if no perfect indel found (via writer::inject_dummy_deletion)
+/// 4. Write all remaining variants after BED exhausted
 ///
 /// # Output Behavior
 /// - All input variants are written to output (preserves complete VCF)
@@ -139,17 +140,21 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// - Changed sequence must be exact tandem repeats of the region's motif
 /// - Must overlap the BED region's coordinates (anchor-aware positioning)
 ///
+/// # Delegation
+/// - Variant filtering: `variant_analysis::should_include_variant`
+/// - VCF writing: `writer::write_variant`, `writer::inject_dummy_deletion`
+///
 /// # Arguments
-/// * `vcf_path` - Path to candidate VCF file (must contain indels)
+/// * `input_vcf` - Opened BCF reader for input VCF
 /// * `bed_path` - Path to microsatellite regions BED file (format: chrom, start, end, NxMOTIF)
-/// * `output` - Output path (None = stdout)
+/// * `writer` - Opened BCF writer for output
 ///
 /// # Returns
-/// * `Ok(PreprocessingStats)` on success
-/// * `Err` if fails
+/// * `Ok(PreprocessingStats)` with processing statistics
+/// * `Err` if processing fails
 ///
 /// # Example
-/// assert!(process_and_annotate(Path::new("candidates.vcf"), Path::new("ms_regions.bed"), Some(Path::new("output.vcf"))).is_ok());
+/// assert!(process_and_annotate(&mut input_vcf, bed_path, &mut writer).is_ok());
 pub(super) fn process_and_annotate(
     input_vcf: &mut bcf::Reader,
     bed_path: &Path,
@@ -328,26 +333,29 @@ pub(super) fn process_and_annotate(
     })
 }
 
-/* ================================================ */
+/* =============== Tests ========================== */
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
+    use tempfile::NamedTempFile;
+
+    use crate::preprocessing::microsatellite_instability::header::prepare_header;
     use crate::utils::bcf_utils::tests::{
         create_test_vcf, read_first_record_simple, TestVcfConfig,
     };
 
-    /* ============ Bed Helper  ====================== */
-
-    // fn create_multi_region_bed() -> NamedTempFile {
-    //     let tmp_bed = NamedTempFile::new().unwrap();
-    //     writeln!(tmp_bed.as_file(), "chr1\t97\t104\t7xT").unwrap(); // pos 100 inside [97, 104)
-    //     writeln!(tmp_bed.as_file(), "chr1\t197\t204\t7xT").unwrap(); // pos 200 inside [197, 204)
-    //     writeln!(tmp_bed.as_file(), "chr2\t147\t154\t7xT").unwrap(); // pos 150 inside [147, 154)
-    //     writeln!(tmp_bed.as_file(), "chrX\t172\t179\t7xT").unwrap(); // pos 175 inside [172, 179)
-    //     tmp_bed
-    // }
+    // Helper: Create BED file
+    fn create_bed_file(regions: &[(&str, u64, u64, &str)]) -> NamedTempFile {
+        let mut tmp = NamedTempFile::new().unwrap();
+        for (chrom, start, end, motif) in regions {
+            writeln!(tmp, "{}\t{}\t{}\t{}", chrom, start, end, motif).unwrap();
+        }
+        tmp.flush().unwrap();
+        tmp
+    }
 
     /* ====== variant_overlaps_region tests ========== */
 
@@ -526,5 +534,152 @@ mod tests {
 
         // ALT2 overlaps region2 (indel at 103)
         assert!(variant_overlaps_region(&record, &region2, 1));
+    }
+
+    /* ====== process_and_annotate tests ============= */
+
+    #[test]
+    fn test_process_and_annotate_basic_annotation() {
+        // VCF: chr1:99 ACAG to ACAGCAG (perfect CAG insertion)
+        // BED: chr1:100-121 7xCAG
+        // Expected: 1 annotated, 0 dummy
+
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAG"],
+            ..Default::default()
+        });
+
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+
+        assert_eq!(stats.annotated_indels, 1);
+        assert_eq!(stats.dummy_indels, 0);
+        assert_eq!(stats.total_regions, 1);
+        assert_eq!(stats.valid_regions, 1);
+    }
+
+    #[test]
+    fn test_process_and_annotate_dummy_injection() {
+        // VCF: chr1:200 A to T (SNV, not MS indel)
+        // BED: chr1:100-121 7xCAG
+        // Expected: 0 annotated, 1 dummy
+
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"T"],
+            ..Default::default()
+        });
+
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+
+        assert_eq!(stats.annotated_indels, 0);
+        assert_eq!(stats.dummy_indels, 1);
+        assert_eq!(stats.total_regions, 1);
+        assert_eq!(stats.valid_regions, 1);
+    }
+
+    #[test]
+    fn test_process_and_annotate_invalid_motif_skipped() {
+        // BED: chr1:100-160 20xCAGCAGCAG (invalid: motif >6bp)
+        // BED: chr1:200-221 7xCAG (valid, but no overlap with variant at pos 99)
+        // Expected: 2 total regions, 1 valid processed, 1 dummy (invalid skipped, valid gets dummy indel)
+
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"AATAT"],
+            ..Default::default()
+        });
+        let tmp_bed = create_bed_file(&[
+            ("chr1", 100, 160, "20xCAGCAGCAG"), // Invalid (motif >6bp)
+            ("chr1", 200, 221, "7xCAG"),        // Valid but no variant overlap
+        ]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+
+        assert_eq!(stats.total_regions, 2);
+        assert_eq!(stats.valid_regions, 1);
+        assert_eq!(stats.dummy_indels, 1);
+    }
+
+    #[test]
+    fn test_process_and_annotate_imperfect_indel_gets_dummy() {
+        // VCF: chr1:99 ACAG to ACAGCAT (imperfect: not pure CAG repeat)
+        // BED: chr1:100-121 7xCAG
+        // Expected: 0 annotated, 1 dummy (imperfect doesn't count)
+
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAT"],
+            ..Default::default()
+        });
+
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+
+        assert_eq!(stats.annotated_indels, 0);
+        assert_eq!(stats.dummy_indels, 1);
+    }
+
+    #[test]
+    fn test_process_and_annotate_multiple_regions_one_variant() {
+        // VCF: chr1:99 ACAG to ACAGCAG (perfect CAG insertion at pos 100)
+        // BED: chr1:94-106 4xCAG    (overlaps)
+        //      chr1:100-121 7xCAG   (overlaps)
+        //      chr1:150-158 8xA     (no overlap)
+        // Expected: 1 variant annotated with 2 region IDs, 1 dummy for chr1:150-158
+
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAG"],
+            ..Default::default()
+        });
+
+        let tmp_bed = create_bed_file(&[
+            ("chr1", 94, 106, "4xCAG"),
+            ("chr1", 100, 121, "7xCAG"),
+            ("chr1", 150, 158, "8xA"),
+        ]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+
+        assert_eq!(stats.total_regions, 3);
+        assert_eq!(stats.valid_regions, 3);
+        assert_eq!(stats.annotated_indels, 1); // One variant, but matches 2 regions
+        assert_eq!(stats.dummy_indels, 1); // chr1:150-158 gets dummy
     }
 }
