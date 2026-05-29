@@ -36,6 +36,7 @@
 //! - `Output` - Output configuration (MSI)
 //! - `Events` - Event validation operations
 //! - `Field` - VCF/BCF field operations etc.
+//! - `Regions` - Genomic regions operations etc.
 //!
 //! ## Error Types:
 //! - `Invalid` - Validation failure
@@ -44,6 +45,7 @@
 //! - `Failed` - Operation failure
 //! - `Mismatch` - Data inconsistency
 //! -  NoValidRegions - No valid regions
+//! - `Overlapping` - Overlapping BED regions etc.
 //!
 //! ## Examples:
 //! - `BedFileInvalid` - Invalid BED file path
@@ -237,6 +239,17 @@ pub(crate) enum Error {
     /* -------------------- VCF/BED Interaction ---------------------- */
     #[error("Chromosome '{chrom}' from BED file not found in VCF header. Ensure chromosome naming is consistent (e.g., 'chr1' vs '1')")]
     MsiChromosomeNotFound { chrom: String },
+    #[error(
+        "Variant at position {pos} overlaps multiple BED regions: \
+        '{existing_region}' and '{new_region}'. \
+        BED intervals must be non-overlapping. \
+        Resolve overlaps before running this command."
+    )]
+    MsiBedRegionsOverlapping {
+        pos: i64,
+        existing_region: String,
+        new_region: String,
+    },
 }
 
 pub(crate) fn invalid_bcf_record(chrom: &str, pos: i64, msg: &str) -> Error {

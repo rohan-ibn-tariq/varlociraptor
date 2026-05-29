@@ -271,7 +271,7 @@ pub(super) fn process_and_annotate(
                     variant_window.push_back(VariantInWindow {
                         record: next_record,
                         chrom,
-                        matching_regions: Vec::new(),
+                        matching_region: None,
                     });
                 }
             }
@@ -298,10 +298,16 @@ pub(super) fn process_and_annotate(
                 if should_include_variant(&variant_info.record, &header_view, alt_idx, &region)? {
                     let region_id = region.region_id();
 
-                    if !variant_info.matching_regions.contains(&region_id) {
-                        variant_info.matching_regions.push(region_id.clone());
+                    if let Some(existing) = &variant_info.matching_region {
+                        return Err(Error::MsiBedRegionsOverlapping {
+                            pos: variant_info.record.pos(),
+                            existing_region: existing.clone(),
+                            new_region: region_id,
+                        }
+                        .into());
                     }
 
+                    variant_info.matching_region = Some(region_id);
                     found_perfect_indel_in_region = true;
                     break;
                 }
@@ -650,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_and_annotate_multiple_regions_one_variant() {
+    fn test_process_and_annotate_overlapping_bed_regions_errors() {
         // VCF: chr1:99 ACAG to ACAGCAG (perfect CAG insertion at pos 100)
         // BED: chr1:94-106 4xCAG    (overlaps)
         //      chr1:100-121 7xCAG   (overlaps)
@@ -675,11 +681,12 @@ mod tests {
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+        let result = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer);
 
-        assert_eq!(stats.total_regions, 3);
-        assert_eq!(stats.valid_regions, 3);
-        assert_eq!(stats.annotated_indels, 1); // One variant, but matches 2 regions
-        assert_eq!(stats.dummy_indels, 1); // chr1:150-158 gets dummy
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("overlaps multiple BED regions"));
     }
 }

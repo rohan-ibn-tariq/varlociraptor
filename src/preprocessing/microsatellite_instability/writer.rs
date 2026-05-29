@@ -24,8 +24,8 @@ pub(super) struct VariantInWindow {
     pub record: bcf::Record,
     /// Chromosome name
     pub chrom: String,
-    /// Accumulated region IDs for MS indels (empty if not MS indel)
-    pub matching_regions: Vec<String>,
+    /// Region ID for MS indels (None if not MS indel)
+    pub matching_region: Option<String>,
 }
 
 /* ============ Functions ========================= */
@@ -112,14 +112,8 @@ pub(super) fn write_variant(
     // Clear any existing REGION_ID annotations from previous preprocessing.
     output_record.clear_info_string(b"REGION_ID")?;
 
-    if !variant_info.matching_regions.is_empty() {
-        let region_id_bytes: Vec<&[u8]> = variant_info
-            .matching_regions
-            .iter()
-            .map(|s| s.as_bytes())
-            .collect();
-
-        output_record.push_info_string(b"REGION_ID", &region_id_bytes)?;
+    if let Some(region_id) = &variant_info.matching_region {
+        output_record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
         *counter += 1;
     }
 
@@ -284,7 +278,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_regions: vec!["chr1:1000-1020".to_string()],
+            matching_region: Some("chr1:1000-1020".to_string()),
         };
 
         let mut counter = 0;
@@ -301,34 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn test_write_variant_with_multiple_regions() {
-        let tmp = NamedTempFile::new().unwrap();
-        let header = create_minimal_vcf_header();
-        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
-
-        let record = create_test_record(&writer, 0, 1015, b"ACAG", b"ACAGCAG");
-
-        let variant_info = VariantInWindow {
-            record,
-            chrom: "chr1".to_string(),
-            matching_regions: vec!["chr1:1000-1020".to_string(), "chr1:1010-1030".to_string()],
-        };
-
-        let mut counter = 1;
-        write_variant(&mut writer, variant_info, &mut counter).unwrap();
-        drop(writer);
-
-        assert_eq!(counter, 2);
-
-        let (_reader, record) = read_first_record_simple(tmp.path());
-
-        let region_ids = record.info(b"REGION_ID").string().unwrap().unwrap();
-        assert_eq!(region_ids.len(), 2);
-        assert_eq!(region_ids[0], b"chr1:1000-1020");
-        assert_eq!(region_ids[1], b"chr1:1010-1030");
-    }
-
-    #[test]
     fn test_write_variant_without_annotation() {
         let tmp = NamedTempFile::new().unwrap();
         let header = create_minimal_vcf_header();
@@ -339,7 +305,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_regions: Vec::new(),
+            matching_region: None,
         };
 
         let mut counter = 0;
@@ -370,7 +336,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_regions: vec!["chr1:5000-5020".to_string()],
+            matching_region: Some("chr1:5000-5020".to_string()),
         };
 
         let mut counter = 0;
@@ -403,7 +369,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_regions: Vec::new(),
+            matching_region: None,
         };
 
         let mut counter = 0;
@@ -432,7 +398,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_regions: vec!["chr1:1000-1020".to_string()],
+            matching_region: Some("chr1:1000-1020".to_string()),
         };
 
         let mut counter = 0;
