@@ -42,6 +42,9 @@ pub(crate) mod estimation;
 pub mod filtration;
 pub(crate) mod grammar;
 pub(crate) mod preprocessing;
+pub use preprocessing::microsatellite_instability::{
+    preprocess_ms_candidates, PreprocessMSIConfig,
+};
 pub(crate) mod reference;
 pub mod testcase;
 pub mod utils;

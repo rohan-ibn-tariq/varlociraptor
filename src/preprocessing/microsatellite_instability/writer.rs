@@ -84,6 +84,8 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
     let region_id = region.region_id();
     record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
 
+    record.push_info_flag(b"MSI_DUMMY")?;
+
     add_missing_format_fields(&mut record, writer.header())?;
 
     writer.write(&record)?;

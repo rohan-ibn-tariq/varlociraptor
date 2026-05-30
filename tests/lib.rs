@@ -458,3 +458,182 @@ fn test_meth_candidates1() -> Result<()> {
     assert_candidates_number("test_meth_ev_1", 6)?;
     Ok(())
 }
+
+//####################################################################################################################################################
+// Tests for Preprocessing
+//####################################################################################################################################################
+
+fn run_msi_preprocess(test: &str) -> Result<PathBuf> {
+    let basedir = basedir(test);
+    let output = format!("{}/output.vcf", basedir);
+    cleanup_file(&output);
+
+    varlociraptor::preprocess_ms_candidates(varlociraptor::PreprocessMSIConfig {
+        microsatellite_bed: PathBuf::from(format!("{}/regions.bed", basedir)),
+        candidate_vcf: PathBuf::from(format!("{}/input.vcf", basedir)),
+        output: Some(PathBuf::from(&output)),
+    })?;
+
+    Ok(PathBuf::from(output))
+}
+
+fn run_msi_preprocess_expect_err(test: &str) -> anyhow::Error {
+    let basedir = basedir(test);
+    let output = format!("{}/output.vcf", basedir);
+    cleanup_file(&output);
+
+    varlociraptor::preprocess_ms_candidates(varlociraptor::PreprocessMSIConfig {
+        microsatellite_bed: PathBuf::from(format!("{}/regions.bed", basedir)),
+        candidate_vcf: PathBuf::from(format!("{}/input.vcf", basedir)),
+        output: Some(PathBuf::from(&output)),
+    })
+    .unwrap_err()
+}
+
+fn read_msi_records(output_path: &PathBuf) -> Result<Vec<bcf::Record>> {
+    let mut reader = bcf::Reader::from_path(output_path)?;
+    Ok(reader.records().map(|r| r.unwrap()).collect())
+}
+
+fn has_region_id(record: &bcf::Record) -> bool {
+    record.info(b"REGION_ID").string().ok().flatten().is_some()
+}
+
+fn get_region_id(record: &bcf::Record) -> Option<String> {
+    record
+        .info(b"REGION_ID")
+        .string()
+        .ok()
+        .flatten()
+        .map(|v| String::from_utf8(v[0].to_vec()).unwrap())
+}
+
+fn is_dummy_record(record: &bcf::Record) -> bool {
+    record.info(b"MSI_DUMMY").flag().unwrap_or(false)
+}
+
+#[test]
+fn test_msi_preprocess_basic_annotation() -> Result<()> {
+    // VCF: 1 perfect CAG insertion at chr1:95
+    // BED: chr1:94-124 10xCAG
+    // Expected: 1 annotated record, 0 dummies
+    let output = run_msi_preprocess("test_msi_preprocess_basic")?;
+    let records = read_msi_records(&output)?;
+
+    assert_eq!(records.len(), 1, "Expected 1 record total");
+    assert!(
+        has_region_id(&records[0]),
+        "Real variant should have REGION_ID"
+    );
+    assert!(
+        !is_dummy_record(&records[0]),
+        "Should NOT have MSI_DUMMY flag"
+    );
+    assert_eq!(
+        get_region_id(&records[0]).unwrap(),
+        "chr1:94-124",
+        "REGION_ID should match the BED region"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_msi_preprocess_dummy_injection() -> Result<()> {
+    let output = run_msi_preprocess("test_msi_preprocess_dummy")?;
+    let records = read_msi_records(&output)?;
+
+    assert_eq!(records.len(), 2, "Expected SNV + dummy = 2 records");
+
+    let dummies: Vec<_> = records.iter().filter(|r| is_dummy_record(r)).collect();
+    let non_dummies: Vec<_> = records.iter().filter(|r| !is_dummy_record(r)).collect();
+
+    assert_eq!(dummies.len(), 1, "Expected exactly 1 dummy");
+    assert_eq!(non_dummies.len(), 1, "Expected exactly 1 original SNV");
+
+    assert!(has_region_id(dummies[0]), "Dummy should have REGION_ID");
+    assert_eq!(get_region_id(dummies[0]).unwrap(), "chr1:94-124");
+    assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
+
+    assert!(
+        !has_region_id(non_dummies[0]),
+        "SNV should NOT have REGION_ID"
+    );
+    assert!(
+        !is_dummy_record(non_dummies[0]),
+        "SNV should NOT have MSI_DUMMY flag"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_msi_preprocess_imperfect_indel_gets_dummy() -> Result<()> {
+    let output = run_msi_preprocess("test_msi_preprocess_imperfect")?;
+    let records = read_msi_records(&output)?;
+
+    assert_eq!(
+        records.len(),
+        2,
+        "Expected imperfect indel + dummy = 2 records"
+    );
+
+    let dummies: Vec<_> = records.iter().filter(|r| is_dummy_record(r)).collect();
+    let non_dummies: Vec<_> = records.iter().filter(|r| !is_dummy_record(r)).collect();
+
+    assert_eq!(dummies.len(), 1, "Expected 1 dummy");
+    assert_eq!(non_dummies.len(), 1, "Expected 1 imperfect indel");
+
+    assert!(has_region_id(dummies[0]), "Dummy should have REGION_ID");
+    assert_eq!(get_region_id(dummies[0]).unwrap(), "chr1:94-124");
+    assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
+
+    assert!(
+        !has_region_id(non_dummies[0]),
+        "Imperfect indel should NOT have REGION_ID"
+    );
+    assert!(
+        !is_dummy_record(non_dummies[0]),
+        "Imperfect indel should NOT have MSI_DUMMY flag"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_msi_preprocess_multi_region() -> Result<()> {
+    let output = run_msi_preprocess("test_msi_preprocess_multi")?;
+    let records = read_msi_records(&output)?;
+
+    assert_eq!(
+        records.len(),
+        2,
+        "Expected annotated variant + dummy = 2 records"
+    );
+
+    let annotated: Vec<_> = records
+        .iter()
+        .filter(|r| has_region_id(r) && !is_dummy_record(r))
+        .collect();
+    let dummies: Vec<_> = records.iter().filter(|r| is_dummy_record(r)).collect();
+
+    assert_eq!(annotated.len(), 1, "Expected 1 annotated real variant");
+    assert_eq!(dummies.len(), 1, "Expected 1 dummy for second region");
+
+    assert_eq!(get_region_id(annotated[0]).unwrap(), "chr1:94-124");
+    assert_eq!(get_region_id(dummies[0]).unwrap(), "chr1:200-230");
+    assert_eq!(dummies[0].pos(), 202, "Dummy pos = 200 + 3 - 1 = 202");
+
+    Ok(())
+}
+
+#[test]
+fn test_msi_preprocess_overlapping_bed_errors() -> Result<()> {
+    let err = run_msi_preprocess_expect_err("test_msi_preprocess_overlap_error");
+    assert!(
+        err.to_string().contains("overlaps multiple BED regions"),
+        "Error message should mention overlapping regions, got: {}",
+        err
+    );
+    Ok(())
+}
