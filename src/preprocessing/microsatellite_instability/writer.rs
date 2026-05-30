@@ -145,6 +145,9 @@ mod tests {
         header.push_record(
             br##"##INFO=<ID=REGION_ID,Number=.,Type=String,Description="BED region ID">"##,
         );
+        header.push_record(
+            br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##
+        );
         header
     }
 
