@@ -514,11 +514,11 @@ fn is_dummy_record(record: &bcf::Record) -> bool {
 }
 
 #[test]
-fn test_msi_preprocess_basic_annotation() -> Result<()> {
+fn test_preprocess_msi_basic_annotation() -> Result<()> {
     // VCF: 1 perfect CAG insertion at chr1:95
     // BED: chr1:94-124 10xCAG
     // Expected: 1 annotated record, 0 dummies
-    let output = run_msi_preprocess("test_msi_preprocess_basic")?;
+    let output = run_msi_preprocess("test_preprocess_msi_basic")?;
     let records = read_msi_records(&output)?;
 
     assert_eq!(records.len(), 1, "Expected 1 record total");
@@ -540,8 +540,8 @@ fn test_msi_preprocess_basic_annotation() -> Result<()> {
 }
 
 #[test]
-fn test_msi_preprocess_dummy_injection() -> Result<()> {
-    let output = run_msi_preprocess("test_msi_preprocess_dummy")?;
+fn test_preprocess_msi_dummy_injection() -> Result<()> {
+    let output = run_msi_preprocess("test_preprocess_msi_dummy")?;
     let records = read_msi_records(&output)?;
 
     assert_eq!(records.len(), 2, "Expected SNV + dummy = 2 records");
@@ -569,8 +569,8 @@ fn test_msi_preprocess_dummy_injection() -> Result<()> {
 }
 
 #[test]
-fn test_msi_preprocess_imperfect_indel_gets_dummy() -> Result<()> {
-    let output = run_msi_preprocess("test_msi_preprocess_imperfect")?;
+fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
+    let output = run_msi_preprocess("test_preprocess_msi_imperfect")?;
     let records = read_msi_records(&output)?;
 
     assert_eq!(
@@ -602,8 +602,8 @@ fn test_msi_preprocess_imperfect_indel_gets_dummy() -> Result<()> {
 }
 
 #[test]
-fn test_msi_preprocess_multi_region() -> Result<()> {
-    let output = run_msi_preprocess("test_msi_preprocess_multi")?;
+fn test_preprocess_msi_multi_region() -> Result<()> {
+    let output = run_msi_preprocess("test_preprocess_msi_multi")?;
     let records = read_msi_records(&output)?;
 
     assert_eq!(
@@ -629,8 +629,8 @@ fn test_msi_preprocess_multi_region() -> Result<()> {
 }
 
 #[test]
-fn test_msi_preprocess_overlapping_bed_errors() -> Result<()> {
-    let err = run_msi_preprocess_expect_err("test_msi_preprocess_overlap_error");
+fn test_preprocess_msi_overlapping_bed_errors() -> Result<()> {
+    let err = run_msi_preprocess_expect_err("test_preprocess_msi_overlap_error");
     assert!(
         err.to_string().contains("overlaps multiple BED regions"),
         "Error message should mention overlapping regions, got: {}",
