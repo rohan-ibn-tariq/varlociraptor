@@ -143,7 +143,7 @@ mod tests {
         header.push_record(br"##fileformat=VCFv4.2");
         header.push_record(br"##contig=<ID=chr1,length=1000000>");
         header.push_record(
-            br##"##INFO=<ID=REGION_ID,Number=.,Type=String,Description="BED region ID">"##,
+            br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID">"##,
         );
         header.push_record(
             br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##

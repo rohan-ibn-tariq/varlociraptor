@@ -39,7 +39,7 @@ pub(super) fn prepare_header(
     let mut header = bcf::Header::from_template(input_header);
 
     header.push_record(
-        br##"##INFO=<ID=REGION_ID,Number=.,Type=String,Description="Comma-separated BED region IDs for MS indels">"##
+        br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##
     );
     header.push_record(
         br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##
