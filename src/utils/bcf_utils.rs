@@ -410,6 +410,102 @@ pub(crate) fn is_spanning_deletion(allele: &[u8]) -> bool {
 
 /* ================================================ */
 
+/* ======= BCF Record Query Function tests ======== */
+
+/// Check if a VCF record has a specific INFO string field present.
+///
+/// Useful for checking optional annotation fields without unwrapping.
+///
+/// # Arguments
+/// * `record` - VCF record to check
+/// * `field` - INFO field name as bytes (e.g., b"REGION_ID")
+///
+/// # Returns
+/// `true` if field exists and has at least one value, `false` otherwise
+///
+/// # Example
+/// assert!(record_has_info_string(&record, b"REGION_ID"));
+/// assert!(!record_has_info_string(&record, b"MISSING_FIELD"));
+pub fn record_has_info_string(record: &bcf::Record, field: &[u8]) -> bool {
+    record.info(field).string().ok().flatten().is_some()
+}
+
+/// Get all values of an INFO string field from a VCF record.
+///
+/// Returns all values as a vector. The caller is responsible for
+/// deciding how many values to use (e.g., first only, or all).
+///
+/// # Arguments
+/// * `record` - VCF record to query
+/// * `field` - INFO field name as bytes (e.g., b"REGION_ID")
+///
+/// # Returns
+/// * `Some(Vec<String>)` - All values if field present
+/// * `None` - If field is absent or any value is not valid UTF-8
+///
+/// # Example
+/// assert_eq!(get_info_strings(&record, b"REGION_ID").unwrap(), vec!["chr1:100-130".to_string()]);
+pub fn get_info_strings(record: &bcf::Record, field: &[u8]) -> Option<Vec<String>> {
+    record.info(field).string().ok().flatten().map(|v| {
+        v.iter()
+            .map(|s| String::from_utf8(s.to_vec()).unwrap())
+            .collect()
+    })
+}
+
+/// Check if a VCF record has a specific INFO flag set.
+///
+/// INFO flags are boolean - present means true, absent means false.
+/// Returns false on any error (field missing, read error).
+///
+/// # Arguments
+/// * `record` - VCF record to check
+/// * `field` - INFO flag name as bytes (e.g., b"MSI_DUMMY")
+///
+/// # Returns
+/// `true` if flag is present, `false` if absent or on error
+///
+/// # Example
+/// assert!(record_has_info_flag(&record, b"MSI_DUMMY"));
+/// assert!(!record_has_info_flag(&record, b"NONEXISTENT"));
+pub fn record_has_info_flag(record: &bcf::Record, field: &[u8]) -> bool {
+    record.info(field).flag().unwrap_or(false)
+}
+
+/// Read all records from a VCF/BCF file into a vector.
+///
+/// Convenience function for tests and small files. For large files,
+/// use `bcf::Reader` directly.
+///
+/// # Arguments
+/// * `path` - Path to VCF/BCF file
+///
+/// # Returns
+/// * `Ok(Vec<bcf::Record>)` - All records in file order
+/// * `Err` - If file cannot be opened or any record fails to parse
+///
+/// # Example
+/// let records = read_bcf_records(Path::new("output.vcf")).unwrap();
+/// assert_eq!(records.len(), 3);
+pub fn read_bcf_records(path: &Path) -> Result<Vec<bcf::Record>> {
+    let mut reader = bcf::Reader::from_path(path).map_err(|_| Error::VcfFileInvalid {
+        path: path.to_path_buf(),
+    })?;
+    reader
+        .records()
+        .map(|r| {
+            r.map_err(|e| {
+                Error::VcfRecordReadFailed {
+                    details: e.to_string(),
+                }
+                .into()
+            })
+        })
+        .collect()
+}
+
+/* ================================================ */
+
 /* ========= BCF Validation Functions ============= */
 
 /// Validate a single VCF header field has correct type and number.
@@ -1182,6 +1278,180 @@ pub(crate) mod tests {
         assert!(is_spanning_deletion(b"*"));
         assert!(!is_spanning_deletion(b"AC"));
     }
+
+    /* ======= BCF Record Query Function tests ======== */
+
+    /// Create a minimal VCF writer for testing INFO field operations.
+    ///
+    /// Creates a temporary VCF file with a minimal header containing
+    /// only `fileformat` and `chr1` contig, plus any additional header
+    /// records provided by the caller (e.g., INFO field definitions).
+    ///
+    /// The returned `NamedTempFile` must be kept alive for the duration
+    /// of the test - dropping it deletes the file.
+    ///
+    /// # Arguments
+    /// * `info_records` - Additional header lines to include
+    ///   (e.g., `br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="Region">"##`)
+    ///
+    /// # Returns
+    /// Tuple of `(tmp_file, writer)` - caller writes records via writer,
+    /// then drops writer.
+    ///
+    /// # Example
+    /// let (tmp, mut writer) = create_info_test_vcf(&[
+    ///     br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="Region">"##
+    /// ]);
+    fn create_info_test_vcf(info_records: &[&[u8]]) -> (NamedTempFile, bcf::Writer) {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut header = bcf::Header::new();
+        header.push_record(br"##fileformat=VCFv4.2");
+        header.push_record(br"##contig=<ID=chr1,length=1000000>");
+        for record in info_records {
+            header.push_record(record);
+        }
+        let writer = bcf::Writer::from_path(tmp.path(), &header, true, bcf::Format::Vcf).unwrap();
+        (tmp, writer)
+    }
+
+    #[test]
+    fn test_record_has_info_string_present_and_absent() {
+        // Present: REGION_ID set - true
+        // Absent:  NONEXISTENT   - false
+        let (tmp, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="Region">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record
+            .push_info_string(b"REGION_ID", &[b"chr1:100-130"])
+            .unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_, record) = read_first_record_simple(tmp.path());
+        assert!(record_has_info_string(&record, b"REGION_ID"));
+        assert!(!record_has_info_string(&record, b"NONEXISTENT"));
+    }
+
+    #[test]
+    fn test_get_info_strings_single_value() {
+        // Number=1 field - Vec with one element
+        let (tmp, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="Region">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record
+            .push_info_string(b"REGION_ID", &[b"chr1:100-130"])
+            .unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_, record) = read_first_record_simple(tmp.path());
+        assert_eq!(
+            get_info_strings(&record, b"REGION_ID"),
+            Some(vec!["chr1:100-130".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_get_info_strings_multiple_values() {
+        // Number=. field - Vec with all elements, caller decides how many to use
+        let (tmp, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=TAGS,Number=.,Type=String,Description="Tags">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record
+            .push_info_string(b"TAGS", &[b"val1", b"val2"])
+            .unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_, record) = read_first_record_simple(tmp.path());
+        assert_eq!(
+            get_info_strings(&record, b"TAGS"),
+            Some(vec!["val1".to_string(), "val2".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_get_info_strings_absent_field() {
+        // Absent field - None
+        let (tmp, mut writer) = create_info_test_vcf(&[]);
+        let record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_, record) = read_first_record_simple(tmp.path());
+        assert_eq!(get_info_strings(&record, b"NONEXISTENT"), None);
+    }
+
+    #[test]
+    fn test_record_has_info_flag_present_and_absent() {
+        // Present: MSI_DUMMY set - true
+        // Absent:  NONEXISTENT   - false
+        let (tmp, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record.push_info_flag(b"MSI_DUMMY").unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_, record) = read_first_record_simple(tmp.path());
+        assert!(record_has_info_flag(&record, b"MSI_DUMMY"));
+        assert!(!record_has_info_flag(&record, b"NONEXISTENT"));
+    }
+
+    #[test]
+    fn test_record_has_info_flag_not_set() {
+        // Flag declared in header but not set on record - false
+        let (tmp, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy">"##,
+        ]);
+        let record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_, record) = read_first_record_simple(tmp.path());
+        assert!(!record_has_info_flag(&record, b"MSI_DUMMY"));
+    }
+
+    #[test]
+    fn test_read_bcf_records_multiple() {
+        // Three records at different positions - all returned in order
+        let (tmp, mut writer) = create_info_test_vcf(&[]);
+        for pos in [100, 200, 300] {
+            let record = create_test_record(&writer, 0, pos, b"A", b"AT");
+            writer.write(&record).unwrap();
+        }
+        drop(writer);
+
+        let records = read_bcf_records(tmp.path()).unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].pos(), 100);
+        assert_eq!(records[1].pos(), 200);
+        assert_eq!(records[2].pos(), 300);
+    }
+
+    #[test]
+    fn test_read_bcf_records_empty_file() {
+        // No records written - empty Vec, not an error
+        let (tmp, writer) = create_info_test_vcf(&[]);
+        drop(writer);
+
+        let records = read_bcf_records(tmp.path()).unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    #[test]
+    fn test_read_bcf_records_nonexistent_file() {
+        // Nonexistent path - VcfFileInvalid error
+        let result = read_bcf_records(Path::new("/nonexistent/file.vcf"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid"));
+    }
+
+    /* ================================================ */
 
     /* ======== validate_vcf_file tests ============== */
 

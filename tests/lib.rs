@@ -11,6 +11,7 @@ use std::{fs, path::Path, path::PathBuf};
 use bio::stats::{LogProb, Prob};
 use itertools::Itertools;
 use rust_htslib::bcf::{self, Read, Reader};
+use varlociraptor::utils::bcf_utils;
 use varlociraptor::{testcase, testcase_should_panic};
 
 testcase!(test01, exact, fast);
@@ -463,7 +464,6 @@ fn test_meth_candidates1() -> Result<()> {
 // Tests for Preprocessing: Microsatellite Instability
 //####################################################################################################################################################
 
-
 fn run_msi_preprocess(test: &str) -> Result<PathBuf> {
     let basedir = basedir(test);
     let output = format!("{}/output.vcf", basedir);
@@ -491,47 +491,27 @@ fn run_msi_preprocess_expect_err(test: &str) -> anyhow::Error {
     .unwrap_err()
 }
 
-fn read_msi_records(output_path: &PathBuf) -> Result<Vec<bcf::Record>> {
-    let mut reader = bcf::Reader::from_path(output_path)?;
-    Ok(reader.records().map(|r| r.unwrap()).collect())
-}
-
-fn has_region_id(record: &bcf::Record) -> bool {
-    record.info(b"REGION_ID").string().ok().flatten().is_some()
-}
-
-fn get_region_id(record: &bcf::Record) -> Option<String> {
-    record
-        .info(b"REGION_ID")
-        .string()
-        .ok()
-        .flatten()
-        .map(|v| String::from_utf8(v[0].to_vec()).unwrap())
-}
-
-fn is_dummy_record(record: &bcf::Record) -> bool {
-    record.info(b"MSI_DUMMY").flag().unwrap_or(false)
-}
-
 #[test]
 fn test_preprocess_msi_basic_annotation() -> Result<()> {
     // VCF: 1 perfect CAG insertion at chr1:95
     // BED: chr1:94-124 10xCAG
     // Expected: 1 annotated record, 0 dummies
     let output = run_msi_preprocess("test_preprocess_msi_basic")?;
-    let records = read_msi_records(&output)?;
+    let records = bcf_utils::read_bcf_records(&output)?;
 
     assert_eq!(records.len(), 1, "Expected 1 record total");
     assert!(
-        has_region_id(&records[0]),
+        bcf_utils::record_has_info_string(&records[0], b"REGION_ID"),
         "Real variant should have REGION_ID"
     );
     assert!(
-        !is_dummy_record(&records[0]),
+        !bcf_utils::record_has_info_flag(&records[0], b"MSI_DUMMY"),
         "Should NOT have MSI_DUMMY flag"
     );
     assert_eq!(
-        get_region_id(&records[0]).unwrap(),
+        bcf_utils::get_info_strings(&records[0], b"REGION_ID")
+            .and_then(|v| v.into_iter().next())
+            .unwrap(),
         "chr1:94-124",
         "REGION_ID should match the BED region"
     );
@@ -542,26 +522,40 @@ fn test_preprocess_msi_basic_annotation() -> Result<()> {
 #[test]
 fn test_preprocess_msi_dummy_injection() -> Result<()> {
     let output = run_msi_preprocess("test_preprocess_msi_dummy")?;
-    let records = read_msi_records(&output)?;
+    let records = bcf_utils::read_bcf_records(&output)?;
 
     assert_eq!(records.len(), 2, "Expected SNV + dummy = 2 records");
 
-    let dummies: Vec<_> = records.iter().filter(|r| is_dummy_record(r)).collect();
-    let non_dummies: Vec<_> = records.iter().filter(|r| !is_dummy_record(r)).collect();
+    let dummies: Vec<_> = records
+        .iter()
+        .filter(|r| bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .collect();
+    let non_dummies: Vec<_> = records
+        .iter()
+        .filter(|r| !bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .collect();
 
     assert_eq!(dummies.len(), 1, "Expected exactly 1 dummy");
     assert_eq!(non_dummies.len(), 1, "Expected exactly 1 original SNV");
 
-    assert!(has_region_id(dummies[0]), "Dummy should have REGION_ID");
-    assert_eq!(get_region_id(dummies[0]).unwrap(), "chr1:94-124");
+    assert!(
+        bcf_utils::record_has_info_string(dummies[0], b"REGION_ID"),
+        "Dummy should have REGION_ID"
+    );
+    assert_eq!(
+        bcf_utils::get_info_strings(dummies[0], b"REGION_ID")
+            .and_then(|v| v.into_iter().next())
+            .unwrap(),
+        "chr1:94-124"
+    );
     assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
 
     assert!(
-        !has_region_id(non_dummies[0]),
+        !bcf_utils::record_has_info_string(non_dummies[0], b"REGION_ID"),
         "SNV should NOT have REGION_ID"
     );
     assert!(
-        !is_dummy_record(non_dummies[0]),
+        !bcf_utils::record_has_info_flag(non_dummies[0], b"MSI_DUMMY"),
         "SNV should NOT have MSI_DUMMY flag"
     );
 
@@ -571,7 +565,7 @@ fn test_preprocess_msi_dummy_injection() -> Result<()> {
 #[test]
 fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
     let output = run_msi_preprocess("test_preprocess_msi_imperfect")?;
-    let records = read_msi_records(&output)?;
+    let records = bcf_utils::read_bcf_records(&output)?;
 
     assert_eq!(
         records.len(),
@@ -579,22 +573,36 @@ fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
         "Expected imperfect indel + dummy = 2 records"
     );
 
-    let dummies: Vec<_> = records.iter().filter(|r| is_dummy_record(r)).collect();
-    let non_dummies: Vec<_> = records.iter().filter(|r| !is_dummy_record(r)).collect();
+    let dummies: Vec<_> = records
+        .iter()
+        .filter(|r| bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .collect();
+    let non_dummies: Vec<_> = records
+        .iter()
+        .filter(|r| !bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .collect();
 
     assert_eq!(dummies.len(), 1, "Expected 1 dummy");
     assert_eq!(non_dummies.len(), 1, "Expected 1 imperfect indel");
 
-    assert!(has_region_id(dummies[0]), "Dummy should have REGION_ID");
-    assert_eq!(get_region_id(dummies[0]).unwrap(), "chr1:94-124");
+    assert!(
+        bcf_utils::record_has_info_string(dummies[0], b"REGION_ID"),
+        "Dummy should have REGION_ID"
+    );
+    assert_eq!(
+        bcf_utils::get_info_strings(dummies[0], b"REGION_ID")
+            .and_then(|v| v.into_iter().next())
+            .unwrap(),
+        "chr1:94-124"
+    );
     assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
 
     assert!(
-        !has_region_id(non_dummies[0]),
+        !bcf_utils::record_has_info_string(non_dummies[0], b"REGION_ID"),
         "Imperfect indel should NOT have REGION_ID"
     );
     assert!(
-        !is_dummy_record(non_dummies[0]),
+        !bcf_utils::record_has_info_flag(non_dummies[0], b"MSI_DUMMY"),
         "Imperfect indel should NOT have MSI_DUMMY flag"
     );
 
@@ -604,7 +612,7 @@ fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
 #[test]
 fn test_preprocess_msi_multi_region() -> Result<()> {
     let output = run_msi_preprocess("test_preprocess_msi_multi")?;
-    let records = read_msi_records(&output)?;
+    let records = bcf_utils::read_bcf_records(&output)?;
 
     assert_eq!(
         records.len(),
@@ -614,15 +622,31 @@ fn test_preprocess_msi_multi_region() -> Result<()> {
 
     let annotated: Vec<_> = records
         .iter()
-        .filter(|r| has_region_id(r) && !is_dummy_record(r))
+        .filter(|r| {
+            bcf_utils::record_has_info_string(r, b"REGION_ID")
+                && !bcf_utils::record_has_info_flag(r, b"MSI_DUMMY")
+        })
         .collect();
-    let dummies: Vec<_> = records.iter().filter(|r| is_dummy_record(r)).collect();
+    let dummies: Vec<_> = records
+        .iter()
+        .filter(|r| bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .collect();
 
     assert_eq!(annotated.len(), 1, "Expected 1 annotated real variant");
     assert_eq!(dummies.len(), 1, "Expected 1 dummy for second region");
 
-    assert_eq!(get_region_id(annotated[0]).unwrap(), "chr1:94-124");
-    assert_eq!(get_region_id(dummies[0]).unwrap(), "chr1:200-230");
+    assert_eq!(
+        bcf_utils::get_info_strings(annotated[0], b"REGION_ID")
+            .and_then(|v| v.into_iter().next())
+            .unwrap(),
+        "chr1:94-124"
+    );
+    assert_eq!(
+        bcf_utils::get_info_strings(dummies[0], b"REGION_ID")
+            .and_then(|v| v.into_iter().next())
+            .unwrap(),
+        "chr1:200-230"
+    );
     assert_eq!(dummies[0].pos(), 202, "Dummy pos = 200 + 3 - 1 = 202");
 
     Ok(())
