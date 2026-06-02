@@ -32,10 +32,12 @@ pub const DEFAULT_MSI_THRESHOLD: &str = "3.5";
 /// are not meaningful for MSI classification.
 pub const MIN_MSI_THRESHOLD: f64 = 0.0;
 
-/// MSI-specific fields to omit from aux_info.write() in addition to
-/// STANDARD_OMIT_AUX_INFO. These are fields explicitly handled by
-/// MSI preprocessing.
-pub const MSI_OMIT_AUX_EXTRA: &str = "REGION_ID, MSI_DUMMY";
+/// INFO fields injected by MSI preprocessing output.
+/// Added to omit set to prevent double-writing via --propagate-info-fields.
+pub const MSI_OUTPUT_INFO_FIELDS: &[&str] = &[
+    "REGION_ID",
+    "MSI_DUMMY",
+];
 
 /// Sliding window size (bp) for regional MSI heatmap analysis.
 pub const DEFAULT_SLIDING_WINDOW_SIZE: u64 = 1_000_000;
