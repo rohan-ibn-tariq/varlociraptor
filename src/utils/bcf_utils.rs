@@ -506,6 +506,63 @@ pub fn read_bcf_records(path: &Path) -> Result<Vec<bcf::Record>> {
 
 /* ================================================ */
 
+/* ======= BCF Record INFO Copy Function ========= */
+
+/// Copy specified INFO fields from source to destination BCF record.
+///
+/// Silently skips fields absent in the source record.
+/// Handles all VCF INFO field types: Integer, Float, String, Flag.
+///
+/// Designed for use in preprocessing pipelines where a fresh output
+/// record needs selected INFO fields carried over from the input.
+///
+/// # Arguments
+/// * `source` - Source BCF record to copy fields from
+/// * `dest` - Destination BCF record to write fields to
+/// * `fields` - Field names to copy as string slices
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if reading source or writing destination fails
+///
+/// # Example
+/// assert!(copy_info_fields(&source_record, &mut dest_record, &["SVLEN", "SVTYPE"]).is_ok());
+pub(crate) fn copy_info_fields(
+    source: &bcf::Record,
+    dest: &mut bcf::Record,
+    fields: &[&str],
+) -> Result<()> {
+    for field in fields {
+        let field_bytes = field.as_bytes();
+
+        if let Ok(Some(values)) = source.info(field_bytes).integer() {
+            dest.push_info_integer(field_bytes, &values)?;
+            continue;
+        }
+
+        if let Ok(Some(values)) = source.info(field_bytes).float() {
+            dest.push_info_float(field_bytes, &values)?;
+            continue;
+        }
+
+        if let Ok(Some(buffer)) = source.info(field_bytes).string() {
+            let values: Vec<&[u8]> = buffer.iter().map(|s| *s).collect();
+            dest.push_info_string(field_bytes, &values)?;
+            continue;
+        }
+
+        if let Ok(true) = source.info(field_bytes).flag() {
+            dest.push_info_flag(field_bytes)?;
+            continue;
+        }
+
+        // Field absent in source - silently skip
+    }
+    Ok(())
+}
+
+/* ================================================ */
+
 /* ========= BCF Validation Functions ============= */
 
 /// Validate a single VCF header field has correct type and number.
