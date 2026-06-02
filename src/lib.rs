@@ -32,6 +32,8 @@ extern crate derefable;
 extern crate typed_builder;
 extern crate paste;
 
+#[macro_use]
+pub(crate) mod macros;
 pub mod calling;
 pub mod candidates;
 pub mod cli;
