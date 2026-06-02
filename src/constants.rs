@@ -34,10 +34,7 @@ pub const MIN_MSI_THRESHOLD: f64 = 0.0;
 
 /// INFO fields injected by MSI preprocessing output.
 /// Added to omit set to prevent double-writing via --propagate-info-fields.
-pub const MSI_OUTPUT_INFO_FIELDS: &[&str] = &[
-    "REGION_ID",
-    "MSI_DUMMY",
-];
+pub const MSI_OUTPUT_INFO_FIELDS: &[&str] = &["REGION_ID", "MSI_DUMMY"];
 
 /// Sliding window size (bp) for regional MSI heatmap analysis.
 pub const DEFAULT_SLIDING_WINDOW_SIZE: u64 = 1_000_000;

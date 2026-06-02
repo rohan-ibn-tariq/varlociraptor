@@ -1,10 +1,10 @@
 //! macros.rs
 //!
 //! Macros for varlociraptor.
-//! 
+//!
 //! Sections of Macros included are:
 //! 1. String Constants - Macros to define string constants;
-//! 
+//!
 
 /* =============== STRING CONSTANTS ================ */
 
