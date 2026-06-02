@@ -17,13 +17,7 @@
 /// to prevent double-writing.
 ///
 /// TODO: Replace OMIT_AUX_INFO in calling/variants/mod.rs with this constant.
-pub const STANDARD_OMIT_AUX_INFO: &[&[u8]] = &[
-    b"MATEID",
-    b"EVENT",
-    b"SVLEN",
-    b"SVTYPE",
-    b"END",
-];
+pub const STANDARD_OMIT_AUX_INFO: &str = "MATEID, EVENT, SVLEN, SVTYPE, END";
 
 
 /* =============== MSI: CONSTANTS ================== */
@@ -43,10 +37,7 @@ pub const MIN_MSI_THRESHOLD: f64 = 0.0;
 /// MSI-specific fields to omit from aux_info.write() in addition to
 /// STANDARD_OMIT_AUX_INFO. These are fields explicitly handled by
 /// MSI preprocessing.
-pub const MSI_OMIT_AUX_EXTRA: &[&[u8]] = &[
-    b"REGION_ID",
-    b"MSI_DUMMY",
-];
+pub const MSI_OMIT_AUX_EXTRA: &str = "REGION_ID, MSI_DUMMY";
 
 /// Sliding window size (bp) for regional MSI heatmap analysis.
 pub const DEFAULT_SLIDING_WINDOW_SIZE: u64 = 1_000_000;
