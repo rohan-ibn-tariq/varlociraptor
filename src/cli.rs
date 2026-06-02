@@ -472,6 +472,15 @@ pub enum PreprocessKind {
             help = "Output file (VCF, BCF, or VCF.GZ; if omitted, writes uncompressed VCF to STDOUT)"
         )]
         output: Option<PathBuf>,
+        #[structopt(
+            long,
+            help = concat!(
+                "Additional INFO fields to propagate. Standard fields (",
+                preprocess_msi_omit_aux_info!(),
+                ") are always propagated automatically."
+            )
+        )]
+        propagate_info_fields: Vec<String>,
     },
 }
 
@@ -1325,6 +1334,7 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     microsatellite_bed,
                     candidate_vcf,
                     output,
+                    propagate_info_fields,
                 } => {
                     info!("==============================================");
                     info!("MSI Preprocessing");

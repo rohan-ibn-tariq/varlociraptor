@@ -12,13 +12,11 @@
 
 /* =============== GENERIC: CONSTANTS ============== */
 
-/// Standard INFO fields always propagated in varlociraptor preprocessing.
-/// These fields are explicitly handled and must be omitted from aux_info.write()
-/// to prevent double-writing.
-///
-/// TODO: Replace OMIT_AUX_INFO in calling/variants/mod.rs with this constant.
-pub const STANDARD_OMIT_AUX_INFO: &str = "MATEID, EVENT, SVLEN, SVTYPE, END";
-
+// Standard INFO fields always propagated in varlociraptor preprocessing.
+// These fields are explicitly handled and must be omitted from aux_info.write()
+// to prevent double-writing.
+//
+// Use standard_omit_aux_info!() macro instead of a constant for this string.
 
 /* =============== MSI: CONSTANTS ================== */
 
