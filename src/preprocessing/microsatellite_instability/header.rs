@@ -13,6 +13,7 @@ use log::debug;
 use rust_htslib::bcf;
 
 use crate::errors::Error;
+use crate::utils::aux_info::AuxInfoCollector;
 use crate::utils::ms_bed::collect_bed_chromosomes;
 
 /// Prepare output VCF header for MSI preprocessing.
@@ -25,16 +26,18 @@ use crate::utils::ms_bed::collect_bed_chromosomes;
 /// # Arguments
 /// * `input_header` - HeaderView from input VCF reader
 /// * `bed_path` - Path to BED file (for collecting chromosome names)
+/// * `aux_info_collector` - Collector for auxiliary INFO fields to propagate (used for header preparation)
 ///
 /// # Returns
 /// * `Ok(Header)` - Prepared header ready for writer creation
 /// * `Err` if BED file cannot be read or has no valid regions
 ///
 /// # Example
-/// assert!(prepare_header(&input_vcf.header(), Path::new("ms_regions.bed")).is_ok());
+/// assert!(prepare_header(&input_vcf.header(), Path::new("ms_regions.bed"), &aux_info_collector).is_ok());
 pub(super) fn prepare_header(
     input_header: &bcf::header::HeaderView,
     bed_path: &Path,
+    aux_info_collector: &AuxInfoCollector,
 ) -> Result<bcf::Header> {
     let mut header = bcf::Header::from_template(input_header);
 

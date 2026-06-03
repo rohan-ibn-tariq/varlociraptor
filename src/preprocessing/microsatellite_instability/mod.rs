@@ -23,6 +23,7 @@ use log::info;
 use rust_htslib::bcf::{self, Format, Read};
 
 use crate::cli::{validate_bed_file, validate_vcf_file};
+use crate::utils::aux_info::AuxInfoCollector;
 use crate::utils::bcf_utils::validate_vcf_file as validate_ms_vcf_file;
 use crate::utils::ms_bed::validate_bed_file as validate_ms_bed_file;
 
@@ -43,6 +44,8 @@ pub struct PreprocessMSIConfig {
     pub candidate_vcf: PathBuf,
     /// Output file path (VCF, BCF, or VCF.GZ; if omitted, writes BCF to STDOUT).
     pub output: Option<PathBuf>,
+    /// List of INFO fields to propagate from the candidate VCF to the output.
+    pub propagate_info_fields: Vec<String>,
 }
 
 impl PreprocessMSIConfig {
@@ -105,6 +108,18 @@ impl PreprocessMSIConfig {
         } else {
             info!("Output: STDOUT (VCF format)");
         }
+
+        if self.propagate_info_fields.is_empty() {
+            info!(
+                "Propagate INFO fields: none (standard fields only, if present: {})",
+                preprocess_msi_omit_aux_info!()
+            );
+        } else {
+            info!(
+                "Propagate INFO fields: {}",
+                self.propagate_info_fields.join(", ")
+            );
+        }
     }
 }
 
@@ -128,8 +143,20 @@ pub fn preprocess_ms_candidates(config: PreprocessMSIConfig) -> Result<()> {
     let mut input_vcf =
         bcf::Reader::from_path(&config.candidate_vcf).context("Failed to open input VCF")?;
 
+    info!("Preparing auxiliary INFO field collector...");
+    let aux_fields: Vec<Vec<u8>> = config
+        .propagate_info_fields
+        .iter()
+        .map(|s| s.as_bytes().to_vec())
+        .collect();
+    let aux_info_collector = AuxInfoCollector::new(&aux_fields, &input_vcf)?;
+
     info!("Preparing output header...");
-    let output_header = prepare_header(input_vcf.header(), &config.microsatellite_bed)?;
+    let output_header = prepare_header(
+        input_vcf.header(),
+        &config.microsatellite_bed,
+        &aux_info_collector,
+    )?;
 
     info!("Determining output format based on output path...");
     let (output_format, output_uncompressed) = config.determine_output_format();
@@ -143,7 +170,12 @@ pub fn preprocess_ms_candidates(config: PreprocessMSIConfig) -> Result<()> {
     };
 
     info!("\nStarting streaming intersection...");
-    let stats = process_and_annotate(&mut input_vcf, &config.microsatellite_bed, &mut writer)?;
+    let stats = process_and_annotate(
+        &mut input_vcf,
+        &config.microsatellite_bed,
+        &mut writer,
+        &aux_info_collector,
+    )?;
     info!("Intersection finished and output generated.");
 
     info!("----------------------------------------------");
@@ -171,6 +203,7 @@ mod tests {
             microsatellite_bed: PathBuf::from("test.bed"),
             candidate_vcf: PathBuf::from("test.vcf"),
             output,
+            propagate_info_fields: vec![],
         }
     }
 

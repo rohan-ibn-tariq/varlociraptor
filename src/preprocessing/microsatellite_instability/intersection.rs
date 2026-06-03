@@ -28,6 +28,7 @@ use log::debug;
 use rust_htslib::bcf::{self, Read};
 
 use crate::errors::Error;
+use crate::utils::aux_info::AuxInfoCollector;
 use crate::utils::bcf_utils::get_chrom;
 use crate::utils::genomics::calculate_indel_position;
 use crate::utils::ms_bed::{parse_bed_record, BedRegion};
@@ -148,17 +149,20 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// * `input_vcf` - Opened BCF reader for input VCF
 /// * `bed_path` - Path to microsatellite regions BED file (format: chrom, start, end, NxMOTIF)
 /// * `writer` - Opened BCF writer for output
+/// * `aux_info_collector` - Collector for auxiliary INFO fields to propagate (used for keeping
+///    track of which INFO fields to copy from input to output)
 ///
 /// # Returns
 /// * `Ok(PreprocessingStats)` with processing statistics
 /// * `Err` if processing fails
 ///
 /// # Example
-/// assert!(process_and_annotate(&mut input_vcf, bed_path, &mut writer).is_ok());
+/// assert!(process_and_annotate(&mut input_vcf, bed_path, &mut writer, &aux_info_collector).is_ok());
 pub(super) fn process_and_annotate(
     input_vcf: &mut bcf::Reader,
     bed_path: &Path,
     mut writer: &mut bcf::Writer,
+    aux_info_collector: &AuxInfoCollector,
 ) -> Result<PreprocessingStats> {
     /* ========== Setup ========== */
     let header_view = input_vcf.header().clone();
