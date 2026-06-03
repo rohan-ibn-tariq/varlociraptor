@@ -1345,6 +1345,7 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                         microsatellite_bed,
                         candidate_vcf,
                         output,
+                        propagate_info_fields,
                     };
 
                     /* Validate the configuration */
