@@ -464,7 +464,10 @@ fn test_meth_candidates1() -> Result<()> {
 // Tests for Preprocessing: Microsatellite Instability
 //####################################################################################################################################################
 
-fn run_msi_preprocess(test: &str) -> Result<PathBuf> {
+fn run_msi_preprocess_with_fields(
+    test: &str,
+    propagate_info_fields: Vec<String>,
+) -> Result<PathBuf> {
     let basedir = basedir(test);
     let output = format!("{}/output.vcf", basedir);
     cleanup_file(&output);
@@ -473,22 +476,18 @@ fn run_msi_preprocess(test: &str) -> Result<PathBuf> {
         microsatellite_bed: PathBuf::from(format!("{}/regions.bed", basedir)),
         candidate_vcf: PathBuf::from(format!("{}/input.vcf", basedir)),
         output: Some(PathBuf::from(&output)),
+        propagate_info_fields,
     })?;
 
     Ok(PathBuf::from(output))
 }
 
-fn run_msi_preprocess_expect_err(test: &str) -> anyhow::Error {
-    let basedir = basedir(test);
-    let output = format!("{}/output.vcf", basedir);
-    cleanup_file(&output);
+fn run_msi_preprocess(test: &str) -> Result<PathBuf> {
+    run_msi_preprocess_with_fields(test, vec![])
+}
 
-    varlociraptor::preprocess_ms_candidates(varlociraptor::PreprocessMSIConfig {
-        microsatellite_bed: PathBuf::from(format!("{}/regions.bed", basedir)),
-        candidate_vcf: PathBuf::from(format!("{}/input.vcf", basedir)),
-        output: Some(PathBuf::from(&output)),
-    })
-    .unwrap_err()
+fn run_msi_preprocess_expect_err(test: &str) -> anyhow::Error {
+    run_msi_preprocess_with_fields(test, vec![]).unwrap_err()
 }
 
 #[test]
