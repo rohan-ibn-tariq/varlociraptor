@@ -1579,7 +1579,33 @@ pub(crate) mod tests {
         assert!(result.unwrap_err().to_string().contains("invalid"));
     }
 
-    /* ================================================ */
+    /* ======= BCF Record INFO Copy Functions ========= */
+
+    #[test]
+    fn test_copy_info_fields_integer() {
+        // Source: record with SVLEN=3
+        let (tmp_src, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record.push_info_integer(b"SVLEN", &[3]).unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        // Dest: fresh record, copy, assert
+        let (tmp_dst, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##,
+        ]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+        copy_info_fields(&src, &mut dst, &["SVLEN"]).unwrap();
+        writer.write(&dst).unwrap();
+        drop(writer);
+
+        let (_, result) = read_first_record_simple(tmp_dst.path());
+        assert_eq!(result.info(b"SVLEN").integer().unwrap().unwrap()[0], 3);
+    }
+
 
     /* ======== validate_vcf_file tests ============== */
 
