@@ -73,6 +73,8 @@ mod tests {
     use rust_htslib::bcf::{self, Format, Read};
     use tempfile::NamedTempFile;
 
+    use crate::utils::aux_info::tests::make_aux_collector;
+
     /// Helper: Create minimal test VCF file with given contigs
     fn create_test_vcf(contigs: &[&str]) -> NamedTempFile {
         let mut tmp = NamedTempFile::new().unwrap();
@@ -109,9 +111,10 @@ mod tests {
     fn test_prepare_header_adds_region_id_field() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let bed_file = create_test_bed(&["chr1"]);
+        let aux = make_aux_collector(vcf_file.path(), &[]);
 
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
-        let result = prepare_header(reader.header(), bed_file.path()).unwrap();
+        let result = prepare_header(reader.header(), bed_file.path(), &aux).unwrap();
 
         let content = header_to_string(&result);
         assert!(content.contains("ID=REGION_ID"));
@@ -121,9 +124,10 @@ mod tests {
     fn test_prepare_header_adds_missing_contigs() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let bed_file = create_test_bed(&["chr1", "chr2"]);
+        let aux = make_aux_collector(vcf_file.path(), &[]);
 
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
-        let result = prepare_header(reader.header(), bed_file.path()).unwrap();
+        let result = prepare_header(reader.header(), bed_file.path(), &aux).unwrap();
 
         let content = header_to_string(&result);
         assert!(content.contains("ID=REGION_ID"));
@@ -134,9 +138,10 @@ mod tests {
     fn test_prepare_header_errors_on_empty_bed() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let empty_bed = NamedTempFile::new().unwrap();
+        let aux = make_aux_collector(vcf_file.path(), &[]);
 
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
-        let result = prepare_header(reader.header(), empty_bed.path());
+        let result = prepare_header(reader.header(), empty_bed.path(), &aux);
 
         assert!(result.is_err());
     }
@@ -145,9 +150,10 @@ mod tests {
     fn test_prepare_header_preserves_existing_contigs() {
         let vcf_file = create_test_vcf(&["chr1", "chr2"]);
         let bed_file = create_test_bed(&["chr1"]);
+        let aux = make_aux_collector(vcf_file.path(), &[]);
 
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
-        let result = prepare_header(reader.header(), bed_file.path()).unwrap();
+        let result = prepare_header(reader.header(), bed_file.path(), &aux).unwrap();
 
         let content = header_to_string(&result);
         // chr2 should still be in header (not removed)
@@ -159,9 +165,10 @@ mod tests {
     fn test_prepare_header_no_duplicate_contigs() {
         let vcf_file = create_test_vcf(&["chr1"]);
         let bed_file = create_test_bed(&["chr1"]);
+        let aux = make_aux_collector(vcf_file.path(), &[]);
 
         let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
-        let result = prepare_header(reader.header(), bed_file.path()).unwrap();
+        let result = prepare_header(reader.header(), bed_file.path(), &aux).unwrap();
 
         let content = header_to_string(&result);
 

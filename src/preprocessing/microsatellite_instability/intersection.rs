@@ -353,6 +353,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::preprocessing::microsatellite_instability::header::prepare_header;
+    use crate::utils::aux_info::tests::make_aux_collector;
     use crate::utils::bcf_utils::tests::{
         create_test_vcf, read_first_record_simple, TestVcfConfig,
     };
@@ -559,16 +560,17 @@ mod tests {
             alt_alleles: vec![b"ACAGCAG"],
             ..Default::default()
         });
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
         let tmp_output = NamedTempFile::new().unwrap();
 
         let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.annotated_indels, 1);
         assert_eq!(stats.dummy_indels, 0);
@@ -587,16 +589,17 @@ mod tests {
             alt_alleles: vec![b"T"],
             ..Default::default()
         });
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
         let tmp_output = NamedTempFile::new().unwrap();
 
         let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.annotated_indels, 0);
         assert_eq!(stats.dummy_indels, 1);
@@ -615,6 +618,8 @@ mod tests {
             alt_alleles: vec![b"AATAT"],
             ..Default::default()
         });
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+
         let tmp_bed = create_bed_file(&[
             ("chr1", 100, 160, "20xCAGCAGCAG"), // Invalid (motif >6bp)
             ("chr1", 200, 221, "7xCAG"),        // Valid but no variant overlap
@@ -622,11 +627,11 @@ mod tests {
         let tmp_output = NamedTempFile::new().unwrap();
 
         let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.total_regions, 2);
         assert_eq!(stats.valid_regions, 1);
@@ -644,16 +649,17 @@ mod tests {
             alt_alleles: vec![b"ACAGCAT"],
             ..Default::default()
         });
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
         let tmp_output = NamedTempFile::new().unwrap();
 
         let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer).unwrap();
+        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.annotated_indels, 0);
         assert_eq!(stats.dummy_indels, 1);
@@ -672,6 +678,7 @@ mod tests {
             alt_alleles: vec![b"ACAGCAG"],
             ..Default::default()
         });
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[
             ("chr1", 94, 106, "4xCAG"),
@@ -681,11 +688,11 @@ mod tests {
         let tmp_output = NamedTempFile::new().unwrap();
 
         let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = prepare_header(input_vcf.header(), tmp_bed.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let result = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer);
+        let result = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux);
 
         assert!(result.is_err());
         assert!(result
