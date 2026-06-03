@@ -178,4 +178,21 @@ mod tests {
         let count = content.matches("contig=<ID=chr1>").count();
         assert_eq!(count, 1, "chr1 should appear exactly once, not duplicated");
     }
+
+    #[test]
+    fn test_prepare_header_propagates_aux_info_fields() {
+        let vcf_file = create_test_vcf(
+            &["chr1"],
+            &[r##"##INFO=<ID=COSMIC_ID,Number=1,Type=String,Description="COSMIC ID">"##],
+        );
+        let bed_file = create_test_bed(&["chr1"]);
+        let aux = make_aux_collector(vcf_file.path(), &["COSMIC_ID"]);
+
+        let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
+        let result = prepare_header(reader.header(), bed_file.path(), &aux).unwrap();
+
+        let content = header_to_string(&result);
+        assert!(content.contains("ID=COSMIC_ID"));
+        assert!(content.contains("ID=REGION_ID"));
+    }
 }
