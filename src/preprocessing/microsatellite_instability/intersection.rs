@@ -570,7 +570,8 @@ mod tests {
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.annotated_indels, 1);
         assert_eq!(stats.dummy_indels, 0);
@@ -599,7 +600,8 @@ mod tests {
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.annotated_indels, 0);
         assert_eq!(stats.dummy_indels, 1);
@@ -631,7 +633,8 @@ mod tests {
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.total_regions, 2);
         assert_eq!(stats.valid_regions, 1);
@@ -659,7 +662,8 @@ mod tests {
         let mut writer =
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
-        let stats = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
 
         assert_eq!(stats.annotated_indels, 0);
         assert_eq!(stats.dummy_indels, 1);
