@@ -1652,6 +1652,28 @@ pub(crate) mod tests {
         assert_eq!(result.info(b"SVTYPE").string().unwrap().unwrap()[0], b"INS");
     }
 
+    #[test]
+    fn test_copy_info_fields_flag() {
+        let (tmp_src, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record.push_info_flag(b"IMPRECISE").unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (tmp_dst, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise">"##,
+        ]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+        copy_info_fields(&src, &mut dst, &["IMPRECISE"]).unwrap();
+        writer.write(&dst).unwrap();
+        drop(writer);
+
+        let (_, result) = read_first_record_simple(tmp_dst.path());
+        assert!(result.info(b"IMPRECISE").flag().unwrap());
+    }
 
     /* ======== validate_vcf_file tests ============== */
 
