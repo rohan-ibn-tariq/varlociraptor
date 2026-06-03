@@ -75,12 +75,15 @@ mod tests {
 
     use crate::utils::aux_info::tests::make_aux_collector;
 
-    /// Helper: Create minimal test VCF file with given contigs
-    fn create_test_vcf(contigs: &[&str]) -> NamedTempFile {
+    /// Helper: Create minimal test VCF file with given contigs and INFO header lines
+    fn create_test_vcf(contigs: &[&str], info_records: &[&str]) -> NamedTempFile {
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, "##fileformat=VCFv4.2\n").unwrap();
         for contig in contigs {
             writeln!(tmp, "##contig=<ID={}>", contig).unwrap();
+        }
+        for info in info_records {
+            writeln!(tmp, "{}", info).unwrap();
         }
         writeln!(tmp, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO").unwrap();
         tmp.flush().unwrap();
@@ -109,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_prepare_header_adds_region_id_field() {
-        let vcf_file = create_test_vcf(&["chr1"]);
+        let vcf_file = create_test_vcf(&["chr1"], &[]);
         let bed_file = create_test_bed(&["chr1"]);
         let aux = make_aux_collector(vcf_file.path(), &[]);
 
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_prepare_header_adds_missing_contigs() {
-        let vcf_file = create_test_vcf(&["chr1"]);
+        let vcf_file = create_test_vcf(&["chr1"], &[]);
         let bed_file = create_test_bed(&["chr1", "chr2"]);
         let aux = make_aux_collector(vcf_file.path(), &[]);
 
@@ -136,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_prepare_header_errors_on_empty_bed() {
-        let vcf_file = create_test_vcf(&["chr1"]);
+        let vcf_file = create_test_vcf(&["chr1"], &[]);
         let empty_bed = NamedTempFile::new().unwrap();
         let aux = make_aux_collector(vcf_file.path(), &[]);
 
@@ -148,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_prepare_header_preserves_existing_contigs() {
-        let vcf_file = create_test_vcf(&["chr1", "chr2"]);
+        let vcf_file = create_test_vcf(&["chr1", "chr2"], &[]);
         let bed_file = create_test_bed(&["chr1"]);
         let aux = make_aux_collector(vcf_file.path(), &[]);
 
@@ -163,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_prepare_header_no_duplicate_contigs() {
-        let vcf_file = create_test_vcf(&["chr1"]);
+        let vcf_file = create_test_vcf(&["chr1"], &[]);
         let bed_file = create_test_bed(&["chr1"]);
         let aux = make_aux_collector(vcf_file.path(), &[]);
 
