@@ -1697,6 +1697,34 @@ pub(crate) mod tests {
         assert!(result.info(b"SVLEN").integer().unwrap().is_none());
     }
 
+    #[test]
+    fn test_copy_info_fields_multiple() {
+        // Integer + String copied in one call
+        let (tmp_src, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##,
+            br##"##INFO=<ID=SVTYPE,Number=1,Type=String,Description="SV type">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record.push_info_integer(b"SVLEN", &[3]).unwrap();
+        record.push_info_string(b"SVTYPE", &[b"INS"]).unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (tmp_dst, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##,
+            br##"##INFO=<ID=SVTYPE,Number=1,Type=String,Description="SV type">"##,
+        ]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+        copy_info_fields(&src, &mut dst, &["SVLEN", "SVTYPE"]).unwrap();
+        writer.write(&dst).unwrap();
+        drop(writer);
+
+        let (_, result) = read_first_record_simple(tmp_dst.path());
+        assert_eq!(result.info(b"SVLEN").integer().unwrap().unwrap()[0], 3);
+        assert_eq!(result.info(b"SVTYPE").string().unwrap().unwrap()[0], b"INS");
+    }
+
     /* ======== validate_vcf_file tests ============== */
 
     #[test]
