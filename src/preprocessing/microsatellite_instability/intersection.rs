@@ -704,4 +704,40 @@ mod tests {
             .to_string()
             .contains("overlaps multiple BED regions"));
     }
+
+    #[test]
+    fn test_process_and_annotate_propagates_aux_info_fields() {
+        // COSMIC_ID as non-standard field - only propagated via aux_info path
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAG"],
+            extra_info_fields: vec![
+                (b"COSMIC_ID", b"1", b"String", b"COSMIC ID", b"COSM123"),
+            ],
+            ..Default::default()
+        });
+        let aux = make_aux_collector(tmp_vcf.path(), &["COSMIC_ID"]);
+
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
+
+        assert_eq!(stats.annotated_indels, 1);
+
+        let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+        let cosmic = record.info(b"COSMIC_ID").string().unwrap();
+        assert!(
+            cosmic.is_some(),
+            "COSMIC_ID should be propagated via aux_info"
+        );
+    }
 }
