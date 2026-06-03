@@ -1606,6 +1606,29 @@ pub(crate) mod tests {
         assert_eq!(result.info(b"SVLEN").integer().unwrap().unwrap()[0], 3);
     }
 
+    #[test]
+    fn test_copy_info_fields_float() {
+        let (tmp_src, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SCORE,Number=A,Type=Float,Description="Score">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        record.push_info_float(b"SCORE", &[0.42]).unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (tmp_dst, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SCORE,Number=A,Type=Float,Description="Score">"##,
+        ]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+        copy_info_fields(&src, &mut dst, &["SCORE"]).unwrap();
+        writer.write(&dst).unwrap();
+        drop(writer);
+
+        let (_, result) = read_first_record_simple(tmp_dst.path());
+        assert!((result.info(b"SCORE").float().unwrap().unwrap()[0] - 0.42).abs() < TEST_EPSILON as f32 );
+    }
+
 
     /* ======== validate_vcf_file tests ============== */
 
