@@ -1626,7 +1626,9 @@ pub(crate) mod tests {
         drop(writer);
 
         let (_, result) = read_first_record_simple(tmp_dst.path());
-        assert!((result.info(b"SCORE").float().unwrap().unwrap()[0] - 0.42).abs() < TEST_EPSILON as f32 );
+        assert!(
+            (result.info(b"SCORE").float().unwrap().unwrap()[0] - 0.42).abs() < TEST_EPSILON as f32
+        );
     }
 
     #[test]

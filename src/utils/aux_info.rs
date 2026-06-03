@@ -134,7 +134,6 @@ impl AuxInfoCollector {
     }
 }
 
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -149,15 +148,9 @@ pub(crate) mod tests {
     /// # Arguments
     /// * `vcf_path` - Path to VCF file whose header declares the fields
     /// * `fields` - INFO field names to collect, empty for no propagation
-    pub(crate) fn make_aux_collector(
-        vcf_path: &Path,
-        fields: &[&str],
-    ) -> AuxInfoCollector {
+    pub(crate) fn make_aux_collector(vcf_path: &Path, fields: &[&str]) -> AuxInfoCollector {
         let reader = bcf::Reader::from_path(vcf_path).unwrap();
-        let fields_bytes: Vec<Vec<u8>> = fields
-            .iter()
-            .map(|s| s.as_bytes().to_vec())
-            .collect();
+        let fields_bytes: Vec<Vec<u8>> = fields.iter().map(|s| s.as_bytes().to_vec()).collect();
         AuxInfoCollector::new(&fields_bytes, &reader).unwrap()
     }
 }
