@@ -965,6 +965,9 @@ pub(crate) mod tests {
         pub prob_high_vaf: Option<Vec<f32>>,
         pub num_samples: usize,
         pub use_phred: bool,
+        /// Extra INFO fields: (id, number, type, description, value)
+        /// e.g. (b"COSMIC_ID", b"1", b"String", b"COSMIC ID", b"COSM123")
+        pub extra_info_fields: Vec<(&'a [u8], &'a [u8], &'a [u8], &'a [u8], &'a [u8])>,
     }
 
     impl<'a> Default for TestVcfConfig<'a> {
@@ -979,6 +982,7 @@ pub(crate) mod tests {
                 prob_high_vaf: None,
                 num_samples: 2,
                 use_phred: false,
+                extra_info_fields: vec![],
             }
         }
     }
@@ -991,6 +995,19 @@ pub(crate) mod tests {
         header.push_record(br"##fileformat=VCFv4.2");
         header.push_record(br"##contig=<ID=chr1,length=1000000>");
         header.push_record(br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##);
+
+        // Extra INFO field declarations
+        for (id, number, type_, desc, _) in &config.extra_info_fields {
+            header.push_record(
+                format!(
+                    "##INFO=<ID={},Number={},Type={},Description=\"{}\">",
+                    String::from_utf8_lossy(id),
+                    String::from_utf8_lossy(number),
+                    String::from_utf8_lossy(type_),
+                    String::from_utf8_lossy(desc),
+                ).as_bytes()
+            );
+        }
 
         // Conditionally set PROB_ABSENT, PROB_ARTIFACT and PROB_SOMATIC headers based on use_phred
         if config.use_phred {
@@ -1041,6 +1058,29 @@ pub(crate) mod tests {
             .map(|alt| (alt.len() as i32) - (config.ref_allele.len() as i32))
             .collect();
         rec.push_info_integer(b"SVLEN", &svlen_values).unwrap();
+
+        // Extra INFO fields with specified values
+        for (id, _, type_, _, value) in &config.extra_info_fields {
+            match *type_ {
+                b"Integer" => {
+                    let v: i32 = std::str::from_utf8(value).unwrap().parse().unwrap();
+                    rec.push_info_integer(id, &[v]).unwrap();
+                }
+                b"Float" => {
+                    let v: f32 = std::str::from_utf8(value).unwrap().parse().unwrap();
+                    rec.push_info_float(id, &[v]).unwrap();
+                }
+                b"Flag" => {
+                    rec.push_info_flag(id).unwrap();
+                }
+                b"String" => {
+                    rec.push_info_string(id, &[*value]).unwrap();
+                }
+                _ => {
+                    panic!("Unsupported INFO field type in test config: {}", String::from_utf8_lossy(type_));
+                }
+            }
+        }
 
         // PROB_ABSENT
         let prob_absent = match config.prob_absent {
