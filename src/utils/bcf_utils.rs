@@ -1675,6 +1675,28 @@ pub(crate) mod tests {
         assert!(result.info(b"IMPRECISE").flag().unwrap());
     }
 
+    #[test]
+    fn test_copy_info_fields_absent_silently_skipped() {
+        // Source has no SVLEN - copy should succeed, dest field absent
+        let (tmp_src, mut writer) = create_info_test_vcf(&[]);
+        let record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (tmp_dst, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##,
+        ]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+
+        assert!(copy_info_fields(&src, &mut dst, &["SVLEN"]).is_ok());
+        writer.write(&dst).unwrap();
+        drop(writer);
+
+        let (_, result) = read_first_record_simple(tmp_dst.path());
+        assert!(result.info(b"SVLEN").integer().unwrap().is_none());
+    }
+
     /* ======== validate_vcf_file tests ============== */
 
     #[test]
