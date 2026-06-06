@@ -10,6 +10,8 @@
 //! 2. MSI: Constants - Microsatellite Instability related constants.
 //!
 
+use std::collections::HashSet;
+
 /* =============== GENERIC: CONSTANTS ============== */
 
 // Standard INFO fields always propagated in varlociraptor preprocessing.
@@ -38,5 +40,25 @@ pub const MSI_OUTPUT_INFO_FIELDS: &[&str] = &["REGION_ID", "MSI_DUMMY"];
 
 /// Sliding window size (bp) for regional MSI heatmap analysis.
 pub const DEFAULT_SLIDING_WINDOW_SIZE: u64 = 1_000_000;
+
+lazy_static! {
+    /// INFO fields copied explicitly from input to output in MSI preprocessing.
+    /// Derived from preprocess_msi_omit_aux_info!() macro.
+    pub static ref PREPROCESS_MSI_COPY_FIELDS: Vec<&'static str> =
+        preprocess_msi_omit_aux_info!()
+            .split(", ")
+            .collect();
+
+    /// INFO fields omitted from aux_info.write() in MSI preprocessing.
+    /// Combines standard propagated fields with MSI-specific output fields
+    /// to prevent double-writing.
+    pub static ref PREPROCESS_MSI_OMIT_AUX: HashSet<Vec<u8>> = {
+        preprocess_msi_omit_aux_info!()
+            .split(", ")
+            .chain(MSI_OUTPUT_INFO_FIELDS.iter().copied())
+            .map(|s| s.as_bytes().to_vec())
+            .collect()
+    };
+}
 
 /* ================================================ */
