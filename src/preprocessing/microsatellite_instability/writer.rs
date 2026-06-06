@@ -153,7 +153,10 @@ mod tests {
     use rust_htslib::bcf::{self, Read};
     use tempfile::NamedTempFile;
 
-    use crate::utils::bcf_utils::tests::{create_test_record, read_first_record_simple};
+    use crate::utils::aux_info::tests::make_aux_collector;
+    use crate::utils::bcf_utils::tests::{
+        create_test_record, create_test_vcf, read_first_record_simple, TestVcfConfig,
+    };
 
     /* ============ VCF Helpers  ======================= */
 
@@ -442,5 +445,44 @@ mod tests {
         let region_id = record.info(b"REGION_ID").string().unwrap().unwrap();
         assert_eq!(region_id.len(), 1);
         assert_eq!(region_id[0], b"chr1:1000-1020");
+    }
+
+    #[test]
+    fn test_write_variant_propagates_aux_info() {
+        let (tmp_src, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"ACAG",
+            alt_alleles: vec![b"ACAGCAG"],
+            extra_info_fields: vec![(b"COSMIC_ID", b"1", b"String", b"COSMIC ID", b"COSM123")],
+            ..Default::default()
+        });
+
+        let aux = make_aux_collector(tmp_src.path(), &["COSMIC_ID"]);
+        let mut src_reader = bcf::Reader::from_path(tmp_src.path()).unwrap();
+        let src_record = src_reader.records().next().unwrap().unwrap();
+        let aux_info = aux.collect(&src_record).unwrap();
+
+        let tmp = NamedTempFile::new().unwrap();
+        let mut header = create_minimal_vcf_header();
+        header.push_record(
+            br##"##INFO=<ID=COSMIC_ID,Number=1,Type=String,Description="COSMIC ID">"##,
+        );
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        let record = create_test_record(&writer, 0, 1000, b"ACAG", b"ACAGCAG");
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_region: Some("chr1:1000-1020".to_string()),
+            aux_info,
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+        let cosmic = record.info(b"COSMIC_ID").string().unwrap();
+        assert!(cosmic.is_some(), "COSMIC_ID propagated via aux_info");
+        assert_eq!(cosmic.unwrap()[0], b"COSM123");
     }
 }
