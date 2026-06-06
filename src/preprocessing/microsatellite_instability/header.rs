@@ -75,6 +75,8 @@ pub(super) fn prepare_header(
     );
 
     // Copy standard INFO field declarations from input header
+    // NOTE: Type, Number, Description are required by VCF spec so None case should not occur
+    // with well-formed input.
     for rec in input_header.header_records() {
         if let bcf::header::HeaderRecord::Info { values, .. } = rec {
             if let Some(id) = values.get("ID") {
