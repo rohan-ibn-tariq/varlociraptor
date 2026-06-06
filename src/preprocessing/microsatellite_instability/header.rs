@@ -12,7 +12,7 @@ use anyhow::Result;
 use log::debug;
 use rust_htslib::bcf;
 
-use crate::constants::PREPROCESS_MSI_COPY_FIELDS;
+use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER, PREPROCESS_MSI_COPY_FIELDS};
 use crate::errors::Error;
 use crate::utils::aux_info::AuxInfoCollector;
 use crate::utils::ms_bed::collect_bed_chromosomes;
@@ -67,12 +67,8 @@ pub(super) fn prepare_header(
     }
 
     // Add MSI-specific INFO fields
-    header.push_record(
-        br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##
-    );
-    header.push_record(
-        br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##
-    );
+    header.push_record(MSI_REGION_ID_HEADER);
+    header.push_record(MSI_DUMMY_HEADER);
 
     // Copy standard INFO field declarations from input header
     // NOTE: Type, Number, Description are required by VCF spec so None case should not occur

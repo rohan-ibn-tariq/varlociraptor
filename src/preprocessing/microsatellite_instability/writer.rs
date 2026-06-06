@@ -12,7 +12,10 @@
 use anyhow::Result;
 use rust_htslib::bcf::{self, Writer};
 
-use crate::constants::{PREPROCESS_MSI_COPY_FIELDS, PREPROCESS_MSI_OMIT_AUX};
+use crate::constants::{
+    MSI_DUMMY_HEADER, MSI_DUMMY_TAG, MSI_REGION_ID_HEADER, MSI_REGION_ID_TAG,
+    PREPROCESS_MSI_COPY_FIELDS, PREPROCESS_MSI_OMIT_AUX,
+};
 use crate::errors::Error;
 use crate::utils::aux_info::AuxInfo;
 use crate::utils::bcf_utils::copy_info_fields;
@@ -91,9 +94,9 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
     record.set_alleles(&[&ref_allele, &alt_allele])?;
 
     let region_id = region.region_id();
-    record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
+    record.push_info_string(MSI_REGION_ID_TAG, &[region_id.as_bytes()])?;
 
-    record.push_info_flag(b"MSI_DUMMY")?;
+    record.push_info_flag(MSI_DUMMY_TAG)?;
 
     writer.write(&record)?;
 
@@ -135,7 +138,7 @@ pub(super) fn write_variant(
         .write(&mut output_record, &PREPROCESS_MSI_OMIT_AUX)?;
 
     if let Some(region_id) = &variant_info.matching_region {
-        output_record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
+        output_record.push_info_string(MSI_REGION_ID_TAG, &[region_id.as_bytes()])?;
         *counter += 1;
     }
 
