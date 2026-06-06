@@ -79,7 +79,11 @@ impl PreprocessingStats {
 /// 3. Calculate actual indel position using genomics::calculate_indel_position
 ///    - Returns None if: complex variant (both tails non-empty), SNV, or identical sequences
 ///    - Returns Some(pos) if clean indel
-/// 4. Check if indel position is within BED region [start, end)
+/// 4. Check if indel position is within BED region:
+///    - Deletions: [start, end) exclusive end per BED convention
+///    - Insertions: [start, end] inclusive end - BED end is exclusive
+///      so region.end equals last_tract_position + 1, making it a
+///      valid attachment point for repeat unit insertions
 ///
 /// # Note:
 /// We perform point-based overlap, which means we only consider the variant position.
@@ -109,7 +113,20 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 
     // Calculate where the indel occurs (None if complex variant/SNV)
     match calculate_indel_position(vcf_pos, ref_allele, alt_allele) {
-        Some(indel_pos) => indel_pos >= region.start && indel_pos < region.end,
+        Some(indel_pos) => {
+            // NOTE:
+            // Only clean indels reach here.
+            // Insertions: inclusive end - appending a repeat unit at region.end
+            // is valid since BED end is exclusive and it's a valid biological msi scenario.
+            // Deletions: exclusive end - standard BED convention.
+            let is_insertion = alt_allele.len() > ref_allele.len();
+            indel_pos >= region.start
+                && if is_insertion {
+                    indel_pos <= region.end
+                } else {
+                    indel_pos < region.end
+                }
+        }
         None => false,
     }
 }
@@ -244,7 +261,10 @@ pub(super) fn process_and_annotate(
                         .min()
                         .unwrap_or(pos);
 
-                    if min_indel_pos >= region.end {
+                    // NOTE: Use > not >= to allow insertions at exactly region.end
+                    // (inclusive end boundary for insertions, BED end is exclusive
+                    // so region.end is a valid insertion attachment point)
+                    if min_indel_pos > region.end {
                         break;
                     }
                 }
@@ -375,15 +395,15 @@ mod tests {
     #[test]
     fn test_variant_overlaps_region() {
         let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"AT"],
+            ref_allele: b"T",
+            alt_alleles: vec![b"TT"],
             ..Default::default()
         });
 
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
-        // VCF POS=99 (0-based), REF=A, ALT=AT
-        // Anchor = A (1 base)
+        // VCF POS=99 (0-based), REF=T, ALT=TT
+        // Anchor = T (1 base)
         // Indel position = 99 + 1 = 100
 
         // At start (inclusive) - region [100, 200), indel at 100
@@ -411,7 +431,7 @@ mod tests {
         ));
 
         // At end (exclusive) - region [99, 100), indel at 100
-        assert!(!variant_overlaps_region(
+        assert!(variant_overlaps_region(
             &record,
             &BedRegion {
                 chrom: "chr1".to_string(),
@@ -547,6 +567,87 @@ mod tests {
 
         // ALT2 overlaps region2 (indel at 103)
         assert!(variant_overlaps_region(&record, &region2, 1));
+    }
+
+    #[test]
+    fn test_variant_overlaps_region_insertion_at_end_boundary() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"T",
+            alt_alleles: vec![b"TT"],
+            ..Default::default()
+        });
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
+
+        // Insertion at exactly region.end=100:  INCLUDED (inclusive)
+        assert!(
+            variant_overlaps_region(
+                &record,
+                &BedRegion {
+                    chrom: "chr1".to_string(),
+                    start: 90,
+                    end: 100,
+                    motif: "T".to_string(),
+                },
+                0
+            ),
+            "Insertion at region.end should be included"
+        );
+
+        // Insertion beyond region.end: EXCLUDED
+        assert!(
+            !variant_overlaps_region(
+                &record,
+                &BedRegion {
+                    chrom: "chr1".to_string(),
+                    start: 90,
+                    end: 99,
+                    motif: "T".to_string(),
+                },
+                0
+            ),
+            "Insertion beyond region.end should be excluded"
+        );
+    }
+
+    #[test]
+    fn test_variant_overlaps_region_deletion_at_end_boundary() {
+        // REF=TT, ALT=T: anchor=T(1 base), indel_pos = 99+1 = 100
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"TT",
+            alt_alleles: vec![b"T"],
+            ..Default::default()
+        });
+        let (_reader, record) = read_first_record_simple(tmp_vcf.path());
+
+        // Deletion at exactly region.end=100: EXCLUDED (exclusive)
+        assert!(
+            !variant_overlaps_region(
+                &record,
+                &BedRegion {
+                    chrom: "chr1".to_string(),
+                    start: 90,
+                    end: 100,
+                    motif: "T".to_string(),
+                },
+                0
+            ),
+            "Deletion at region.end should be excluded"
+        );
+
+        // Deletion inside region: INCLUDED
+        assert!(
+            variant_overlaps_region(
+                &record,
+                &BedRegion {
+                    chrom: "chr1".to_string(),
+                    start: 90,
+                    end: 101,
+                    motif: "T".to_string(),
+                },
+                0
+            ),
+            "Deletion inside region should be included"
+        );
     }
 
     /* ====== process_and_annotate tests ============= */
