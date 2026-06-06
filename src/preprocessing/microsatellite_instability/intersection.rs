@@ -272,10 +272,12 @@ pub(super) fn process_and_annotate(
                         continue;
                     }
 
+                    let aux_info = aux_info_collector.collect(&next_record)?;
                     variant_window.push_back(VariantInWindow {
                         record: next_record,
                         chrom,
                         matching_region: None,
+                        aux_info,
                     });
                 }
             }
@@ -711,9 +713,7 @@ mod tests {
         let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
             ref_allele: b"ACAG",
             alt_alleles: vec![b"ACAGCAG"],
-            extra_info_fields: vec![
-                (b"COSMIC_ID", b"1", b"String", b"COSMIC ID", b"COSM123"),
-            ],
+            extra_info_fields: vec![(b"COSMIC_ID", b"1", b"String", b"COSMIC ID", b"COSM123")],
             ..Default::default()
         });
         let aux = make_aux_collector(tmp_vcf.path(), &["COSMIC_ID"]);

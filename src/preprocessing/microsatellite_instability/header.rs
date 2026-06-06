@@ -12,6 +12,7 @@ use anyhow::Result;
 use log::debug;
 use rust_htslib::bcf;
 
+use crate::constants::PREPROCESS_MSI_COPY_FIELDS;
 use crate::errors::Error;
 use crate::utils::aux_info::AuxInfoCollector;
 use crate::utils::ms_bed::collect_bed_chromosomes;
@@ -39,15 +40,18 @@ pub(super) fn prepare_header(
     bed_path: &Path,
     aux_info_collector: &AuxInfoCollector,
 ) -> Result<bcf::Header> {
-    let mut header = bcf::Header::from_template(input_header);
+    let mut header = bcf::Header::new();
 
-    header.push_record(
-        br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##
-    );
-    header.push_record(
-        br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##
-    );
+    // Copy Contigs from input header
+    for rec in input_header.header_records() {
+        if let bcf::header::HeaderRecord::Contig { values, .. } = rec {
+            if let Some(id) = values.get("ID") {
+                header.push_record(format!("##contig=<ID={}>", id).as_bytes());
+            }
+        }
+    }
 
+    // Add BED chromosomes missing from input
     let bed_chroms = collect_bed_chromosomes(bed_path)?;
 
     if bed_chroms.is_empty() {
@@ -61,6 +65,40 @@ pub(super) fn prepare_header(
             debug!("Added missing contig to VCF header: {}", chrom);
         }
     }
+
+    // Add MSI-specific INFO fields
+    header.push_record(
+        br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##
+    );
+    header.push_record(
+        br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##
+    );
+
+    // Copy standard INFO field declarations from input header
+    for rec in input_header.header_records() {
+        if let bcf::header::HeaderRecord::Info { values, .. } = rec {
+            if let Some(id) = values.get("ID") {
+                if PREPROCESS_MSI_COPY_FIELDS.contains(&id.as_str()) {
+                    if let (Some(number), Some(type_), Some(desc)) = (
+                        values.get("Number"),
+                        values.get("Type"),
+                        values.get("Description"),
+                    ) {
+                        header.push_record(
+                            format!(
+                                "##INFO=<ID={},Number={},Type={},Description={}>",
+                                id, number, type_, desc
+                            )
+                            .as_bytes(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // User-specified propagated fields via --propagate-info-fields
+    aux_info_collector.write_header_info(&mut header);
 
     Ok(header)
 }

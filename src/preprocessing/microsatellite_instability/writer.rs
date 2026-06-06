@@ -12,8 +12,10 @@
 use anyhow::Result;
 use rust_htslib::bcf::{self, Writer};
 
+use crate::constants::{PREPROCESS_MSI_COPY_FIELDS, PREPROCESS_MSI_OMIT_AUX};
 use crate::errors::Error;
-use crate::utils::bcf_utils::add_missing_format_fields;
+use crate::utils::aux_info::AuxInfo;
+use crate::utils::bcf_utils::copy_info_fields;
 use crate::utils::ms_bed::BedRegion;
 
 /* ============ Data Structures =================== */
@@ -26,6 +28,11 @@ pub(super) struct VariantInWindow {
     pub chrom: String,
     /// Region ID for MS indels (None if not MS indel)
     pub matching_region: Option<String>,
+    /// User-specified INFO fields collected from input record.
+    /// Written to output via aux_info.write() during write_variant.
+    /// Fields in PREPROCESS_MSI_OMIT_AUX are excluded to prevent
+    /// double-writing with copy_info_fields().
+    pub aux_info: AuxInfo,
 }
 
 /* ============ Functions ========================= */
@@ -36,17 +43,19 @@ pub(super) struct VariantInWindow {
 /// first repeat. Uses the last base of the first motif as anchor, avoiding
 /// the need for flanking sequence outside the region.
 ///
+/// Output record contains only REGION_ID and MSI_DUMMY INFO fields.
+/// No FORMAT or sample data is written.
+///
 /// # Arguments
 /// * `writer` - VCF writer
 /// * `region` - BED region requiring dummy indel
-/// * `header` - VCF header
 ///
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err` if chromosome not found or motif is empty
 ///
 /// # Example
-/// assert!(inject_dummy_deletion(&mut writer, &region, &header).is_ok());
+/// assert!(inject_dummy_deletion(&mut writer, &region).is_ok());
 pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> Result<()> {
     let mut record = writer.empty_record();
 
@@ -86,8 +95,6 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
 
     record.push_info_flag(b"MSI_DUMMY")?;
 
-    add_missing_format_fields(&mut record, writer.header())?;
-
     writer.write(&record)?;
 
     Ok(())
@@ -95,24 +102,37 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
 
 /// Write variant to output, with region annotations if present.
 ///
-/// All variants are written to maintain complete VCF. Perfect MS indels
-/// receive `INFO/REGION_ID` annotation with comma-separated region IDs.
+/// Creates a fresh output record containing:
+/// 1. Position and alleles from input record
+/// 2. Standard INFO fields copied via copy_info_fields()
+/// 3. User-specified INFO fields via aux_info.write()
+/// 4. REGION_ID annotation if variant overlaps a perfect MS region
+///
+/// FORMAT and sample data are intentionally omitted.
 ///
 /// # Arguments
 /// * `writer` - VCF writer
-/// * `variant_info` - Variant with accumulated region annotations
+/// * `variant_info` - Variant with accumulated region annotation and aux info
 /// * `counter` - Counter for annotated MS indels (incremented if annotations present)
 pub(super) fn write_variant(
     writer: &mut Writer,
     variant_info: VariantInWindow,
     counter: &mut usize,
 ) -> Result<()> {
-    let mut output_record = variant_info.record.clone();
+    let mut output_record = writer.empty_record();
+    output_record.set_rid(variant_info.record.rid());
+    output_record.set_pos(variant_info.record.pos());
+    output_record.set_alleles(&variant_info.record.alleles())?;
 
-    writer.translate(&mut output_record);
+    copy_info_fields(
+        &variant_info.record,
+        &mut output_record,
+        &PREPROCESS_MSI_COPY_FIELDS,
+    )?;
 
-    // Clear any existing REGION_ID annotations from previous preprocessing.
-    output_record.clear_info_string(b"REGION_ID")?;
+    variant_info
+        .aux_info
+        .write(&mut output_record, &PREPROCESS_MSI_OMIT_AUX)?;
 
     if let Some(region_id) = &variant_info.matching_region {
         output_record.push_info_string(b"REGION_ID", &[region_id.as_bytes()])?;
@@ -284,6 +304,7 @@ mod tests {
             record,
             chrom: "chr1".to_string(),
             matching_region: Some("chr1:1000-1020".to_string()),
+            aux_info: AuxInfo::default(),
         };
 
         let mut counter = 0;
@@ -311,6 +332,7 @@ mod tests {
             record,
             chrom: "chr1".to_string(),
             matching_region: None,
+            aux_info: AuxInfo::default(),
         };
 
         let mut counter = 0;
@@ -342,6 +364,7 @@ mod tests {
             record,
             chrom: "chr1".to_string(),
             matching_region: Some("chr1:5000-5020".to_string()),
+            aux_info: AuxInfo::default(),
         };
 
         let mut counter = 0;
@@ -375,6 +398,7 @@ mod tests {
             record,
             chrom: "chr1".to_string(),
             matching_region: None,
+            aux_info: AuxInfo::default(),
         };
 
         let mut counter = 0;
@@ -404,6 +428,7 @@ mod tests {
             record,
             chrom: "chr1".to_string(),
             matching_region: Some("chr1:1000-1020".to_string()),
+            aux_info: AuxInfo::default(),
         };
 
         let mut counter = 0;
