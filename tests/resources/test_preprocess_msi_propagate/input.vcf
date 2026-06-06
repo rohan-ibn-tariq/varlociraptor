@@ -1,0 +1,6 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=1000000>
+##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">
+##INFO=<ID=COSMIC_ID,Number=1,Type=String,Description="COSMIC ID">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	94	.	ACAG	ACAGCAG	.	.	SVLEN=3;COSMIC_ID=COSM123

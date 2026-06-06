@@ -661,3 +661,25 @@ fn test_preprocess_msi_overlapping_bed_errors() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn test_preprocess_msi_propagates_info_fields() -> Result<()> {
+    let output = run_msi_preprocess_with_fields(
+        "test_preprocess_msi_propagate",
+        vec!["COSMIC_ID".to_string()],
+    )?;
+    let records = bcf_utils::read_bcf_records(&output)?;
+
+    assert_eq!(records.len(), 1, "Expected 1 annotated record");
+    assert!(
+        bcf_utils::record_has_info_string(&records[0], b"COSMIC_ID"),
+        "COSMIC_ID should be propagated"
+    );
+    assert_eq!(
+        bcf_utils::get_info_strings(&records[0], b"COSMIC_ID")
+            .and_then(|v| v.into_iter().next())
+            .unwrap(),
+        "COSM123"
+    );
+    Ok(())
+}
