@@ -1005,7 +1005,8 @@ pub(crate) mod tests {
                     String::from_utf8_lossy(number),
                     String::from_utf8_lossy(type_),
                     String::from_utf8_lossy(desc),
-                ).as_bytes()
+                )
+                .as_bytes(),
             );
         }
 
@@ -1077,7 +1078,10 @@ pub(crate) mod tests {
                     rec.push_info_string(id, &[*value]).unwrap();
                 }
                 _ => {
-                    panic!("Unsupported INFO field type in test config: {}", String::from_utf8_lossy(type_));
+                    panic!(
+                        "Unsupported INFO field type in test config: {}",
+                        String::from_utf8_lossy(type_)
+                    );
                 }
             }
         }
