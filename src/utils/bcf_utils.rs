@@ -1156,7 +1156,8 @@ pub(crate) mod tests {
                     }
                 }
             };
-            rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf).unwrap();
+            rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf)
+                .unwrap();
         }
 
         // GT
