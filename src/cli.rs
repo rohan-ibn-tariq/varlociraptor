@@ -28,7 +28,6 @@ use crate::conversion;
 use crate::errors;
 use crate::estimation;
 use crate::estimation::alignment_properties::AlignmentProperties;
-use crate::estimation::microsatellite_instability as msi;
 use crate::{calling, constants};
 //use crate::estimation::sample_variants;
 //use crate::estimation::tumor_mutational_burden;
@@ -38,7 +37,6 @@ use crate::preprocessing;
 use crate::preprocessing::microsatellite_instability as msi_preprocessing;
 use crate::reference;
 use crate::testcase;
-use crate::utils::bcf_utils;
 use crate::utils::ms_bed;
 use crate::utils::PathMap;
 use crate::variants::evidence::realignment;
@@ -639,93 +637,6 @@ pub enum EstimateKind {
             help = "Minimal variant allelic fraction to consider for mutli-sample barplot"
         )]
         cutoff: f64,
-    },
-    #[structopt(
-        name = "microsatellite-instability",
-        visible_alias = "msi",
-        about = "Estimate microsatellite instability (MSI) [status: EXPERIMENTAL]",
-        long_about = "Estimate Microsatellite Instability (MSI) from variant calls at microsatellite loci. \
-             Takes a BED file with microsatellite loci in UCSC microsatellite schema format \
-             (without the bin column) and a Varlociraptor-format VCF/BCF file, and produces \
-             either the MSI score distribution or MSI score evolution as Vega-Lite JSON output \
-             file(s) or their TSV plot data file(s). [status: EXPERIMENTAL]",
-        usage = "varlociraptor estimate microsatellite-instability microsatellites.bed calls.vcf \
-                 --threads 4 --msi-threshold 3.5 --plot-pseudotime msi-pseudotime.vl.json --data-pseudotime \
-                 msi-pseudotime.tsv\n\n \
-                 varlociraptor estimate msi microsatellites.bed calls.bcf \
-                 --msi-threshold 3.0 --plot-distribution msi-distribution.vl.json --data-distribution \
-                 msi-distribution.tsv",
-        setting = structopt::clap::AppSettings::ColoredHelp,
-    )]
-    MicrosatelliteInstability {
-        #[structopt(
-            parse(from_os_str),
-            help = "BED file with microsatellite loci [chrom, start, end, name (format: <count>x<motif>)]."
-        )]
-        microsatellite_bed: PathBuf,
-        #[structopt(
-            parse(from_os_str),
-            help = "VCF/BCF (gzipped or uncompressed) file with variant calls."
-        )]
-        calls: PathBuf,
-        #[structopt(
-            long,
-            short = "t",
-            help = "Number of threads (must be >= 1, default: auto-detect best possible number)."
-        )]
-        threads: Option<usize>,
-        #[structopt(
-            long,
-            default_value = msi::DEFAULT_MSI_THRESHOLD,
-            help = "MSI classification threshold (must be > 0.0).",
-        )]
-        msi_threshold: f64,
-        #[structopt(
-            long,
-            use_delimiter = true,
-            value_delimiter = ",",
-            help = "Sample names to exclude from MSI analysis \
-                    (comma-separated, e.g. --samples-exclusion blood,tumor)"
-        )]
-        samples_exclusion: Vec<String>,
-        #[structopt(
-            long = "af-thresholds",
-            hidden = true,
-            default_value = "1.0,0.8,0.6,0.4,0.2,0.1,0.05,0.02,0.0",
-            use_delimiter = true,
-            help = "Allele frequency thresholds for MSI evolution analysis (internal)"
-        )]
-        af_thresholds: Vec<f64>,
-        #[structopt(
-            long,
-            parse(from_os_str),
-            help = "Output path for MSI score distribution plot (Vega-Lite JSON). \
-                    Recommended: .vl.json extension."
-        )]
-        plot_distribution: Option<PathBuf>,
-        #[structopt(
-            long,
-            parse(from_os_str),
-            help = "Output path for pseudotime plot (Vega-Lite JSON), showing MSI \
-                    score evolution across allele frequency thresholds. \
-                    Recommended: .vl.json extension."
-        )]
-        plot_pseudotime: Option<PathBuf>,
-        #[structopt(
-            long,
-            parse(from_os_str),
-            help = "Output path for MSI score distribution data (TSV). \
-                    Recommended: .tsv extension."
-        )]
-        data_distribution: Option<PathBuf>,
-        #[structopt(
-            long,
-            parse(from_os_str),
-            help = "Output path for pseudotime data (TSV), showing MSI \
-                    score evolution across allele frequency thresholds. \
-                    Recommended: .tsv extension."
-        )]
-        data_pseudotime: Option<PathBuf>,
     },
 }
 
@@ -1709,53 +1620,6 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     num_records,
                 )?;
                 println!("{}", serde_json::to_string_pretty(&alignment_properties)?);
-            }
-            EstimateKind::MicrosatelliteInstability {
-                microsatellite_bed,
-                calls,
-                threads,
-                msi_threshold,
-                samples_exclusion,
-                af_thresholds,
-                plot_distribution,
-                plot_pseudotime,
-                data_distribution,
-                data_pseudotime,
-            } => {
-                info!("==============================================");
-                info!("MSI Estimation [EXPERIMENTAL]");
-                info!("==============================================");
-                info!("----------------------------------------------");
-                info!("Step 0: Validating Files and Cli Arguments");
-                info!("----------------------------------------------");
-
-                /* generic validations: file extensions & thread count */
-                validate_bed_file(&microsatellite_bed)?;
-                validate_vcf_file(&calls)?;
-                validate_thread_count(threads)?;
-
-                /* MSI or content specific validations */
-                ms_bed::validate_bed_file(&microsatellite_bed)?;
-                let (samples_info, is_phred) =
-                    bcf_utils::validate_vcf_file_ex(&calls, &samples_exclusion)?;
-                let config = msi::MsiConfig {
-                    microsatellite_bed,
-                    calls,
-                    threads,
-                    msi_threshold,
-                    samples: samples_info.samples,
-                    samples_index_map: samples_info.samples_index_map,
-                    is_phred,
-                    af_thresholds,
-                    plot_distribution,
-                    plot_pseudotime,
-                    data_distribution,
-                    data_pseudotime,
-                };
-                config.validate()?;
-
-                /* dispatch to MSI estimation */
-                msi::estimate_msi(config)?;
             }
         },
         Varlociraptor::Plot { kind } => match kind {

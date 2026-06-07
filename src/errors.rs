@@ -58,7 +58,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::cli::MIN_THREAD_COUNT;
-use crate::estimation::microsatellite_instability as msi;
+use crate::constants::{DEFAULT_MSI_THRESHOLD, MIN_MSI_THRESHOLD};
 
 #[derive(Error, Debug, PartialEq)]
 pub(crate) enum Error {
@@ -219,8 +219,8 @@ pub(crate) enum Error {
     /* -------------------- Configuration ---------------------------- */
     #[error(
         "invalid MSI threshold: must be > {} (default: {}), got {threshold}",
-        msi::MIN_MSI_THRESHOLD,
-        msi::DEFAULT_MSI_THRESHOLD
+        MIN_MSI_THRESHOLD,
+        DEFAULT_MSI_THRESHOLD
     )]
     MsiConfigThresholdInvalid { threshold: f64 },
     #[error("at least one output must be specified: use --plot-pseudotime, --plot-distribution, --data-pseudotime, or --data-distribution")]
