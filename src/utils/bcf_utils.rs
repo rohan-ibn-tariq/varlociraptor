@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use bio::stats::{LogProb, Prob};
 use log::{debug, info, warn};
 use rust_htslib::bcf::header::{HeaderView, TagLength, TagType};
 use rust_htslib::bcf::{self, record::Numeric, Read};
@@ -129,6 +130,7 @@ pub(crate) fn get_svlen(
     Ok(calculate_dynamic_svlen(ref_seq, alt_seq))
 }
 
+// TODO: Remove this function when old estimate MSI code removed.
 /// Get combined probability that variant is absent (artifact)
 ///
 /// Extracts and combines two sources of artifact evidence:
@@ -237,6 +239,86 @@ pub(crate) fn get_prob_absent(
     let probability = probability_final.clamp(0.0, 1.0);
 
     Ok(Some(probability))
+}
+
+/// Combine probabilities for user-specified events into
+/// P(at least one specified event) for one ALT allele.
+///
+/// Note: As per current variant calling implementation in
+/// Varlociraptor, these events are assigned to each ALT
+/// allele separately (Number=A). See method, fn header(&self)
+/// of Caller in src/variants/calling.rs for details. Therefore,
+/// if in future implemenation changes this function may need to
+/// be updated to handle different Number types (e.g. Number=1 or Number=G).
+/// Also it considers float type probabilities, based on the current
+/// implementation.
+///
+/// For each event name, reads `INFO/PROB_{EVENT}` (uppercased),
+/// converts to log-space, and sums via `LogProb::ln_sum_exp`.
+/// Returns the result as a linear probability.
+///
+/// Returns `None` if any event field is absent or missing at `alt_idx`.
+/// Partial data is treated as unusable rather than silently summing
+/// incomplete evidence.
+///
+/// # Arguments
+/// * `record`   - VCF record
+/// * `header`   - VCF header
+/// * `alt_idx`  - ALT allele index (0-based into the ALT array, not alleles array)
+/// * `events`   - Event names (e.g. `["somatic", "germline_het"]`)
+/// * `is_phred` - Whether `INFO/PROB_*` values are PHRED-scaled
+///
+/// # Returns
+/// * `Ok(Some(p))` - P(at least one event) in [0.0, 1.0]
+/// * `Ok(None)`    - Any `PROB_{EVENT}` field absent or missing at `alt_idx`
+/// * `Err`         - NaN value in a probability field
+pub(crate) fn get_events_probability(
+    record: &bcf::Record,
+    header: &HeaderView,
+    alt_idx: usize,
+    events: &[String],
+    is_phred: bool,
+) -> Result<Option<f64>> {
+    let mut log_probs: Vec<LogProb> = Vec::with_capacity(events.len());
+
+    for event_name in events {
+        let field_name = format!("PROB_{}", event_name.to_uppercase());
+        let field_bytes = field_name.as_bytes();
+
+        let raw = match record.info(field_bytes).float()? {
+            Some(p) if alt_idx < p.len() => p[alt_idx],
+            _ => return Ok(None),
+        };
+
+        if raw.is_missing() {
+            return Ok(None);
+        }
+
+        if raw.is_nan() {
+            return Err(Error::VcfProbabilityValueInvalid {
+                field: field_name,
+                value: raw,
+                chrom: get_chrom(record, header)?,
+                pos: record.pos() + 1,
+            }
+            .into());
+        }
+
+        let linear = if is_phred {
+            phred_to_prob(raw as f64)
+        } else {
+            raw as f64
+        };
+
+        log_probs.push(LogProb::from(Prob(linear.clamp(0.0, 1.0))));
+    }
+
+    if log_probs.is_empty() {
+        return Ok(None);
+    }
+
+    let prob_events = (*Prob::from(LogProb::ln_sum_exp(&log_probs))).clamp(0.0, 1.0);
+    Ok(Some(prob_events))
 }
 
 /// Extract per-sample allele frequencies for a specific ALT allele.
@@ -864,7 +946,8 @@ pub(crate) mod tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::genomics::is_indel;
-    use crate::utils::stats::TEST_EPSILON;
+    use crate::utils::stats::test_constants::TEST_EPSILON;
+    use crate::utils::stats::test_constants::TEST_EPSILON_LOOSE;
 
     /// Encodes a single allele for the GT field in BCF format.
     ///
@@ -897,6 +980,8 @@ pub(crate) mod tests {
         /// Extra INFO fields: (id, number, type, description, value)
         /// e.g. (b"COSMIC_ID", b"1", b"String", b"COSMIC ID", b"COSM123")
         pub extra_info_fields: Vec<(&'a [u8], &'a [u8], &'a [u8], &'a [u8], &'a [u8])>,
+        pub write_prob_somatic: bool,
+        pub write_prob_high_vaf: bool,
     }
 
     impl<'a> Default for TestVcfConfig<'a> {
@@ -912,6 +997,8 @@ pub(crate) mod tests {
                 num_samples: 2,
                 use_phred: false,
                 extra_info_fields: vec![],
+                write_prob_somatic: true,
+                write_prob_high_vaf: true,
             }
         }
     }
@@ -1043,31 +1130,34 @@ pub(crate) mod tests {
             .unwrap();
 
         // PROB_SOMATIC
-        let prob_somatic = match config.prob_somatic {
-            Some(ps) => ps,
-            None => {
-                if config.use_phred {
-                    vec![30.0; config.alt_alleles.len()]
-                } else {
-                    vec![0.001; config.alt_alleles.len()]
+        if config.write_prob_somatic {
+            let prob_somatic = match config.prob_somatic {
+                Some(ps) => ps,
+                None => {
+                    if config.use_phred {
+                        vec![30.0; config.alt_alleles.len()]
+                    } else {
+                        vec![0.001; config.alt_alleles.len()]
+                    }
                 }
-            }
-        };
-        rec.push_info_float(b"PROB_SOMATIC", &prob_somatic).unwrap();
+            };
+            rec.push_info_float(b"PROB_SOMATIC", &prob_somatic).unwrap();
+        }
 
         // PROB_HIGH_VAF
-        let prob_high_vaf = match config.prob_high_vaf {
-            Some(phv) => phv,
-            None => {
-                if config.use_phred {
-                    vec![40.0; config.alt_alleles.len()]
-                } else {
-                    vec![0.0001; config.alt_alleles.len()]
+        if config.write_prob_high_vaf {
+            let prob_high_vaf = match config.prob_high_vaf {
+                Some(phv) => phv,
+                None => {
+                    if config.use_phred {
+                        vec![40.0; config.alt_alleles.len()]
+                    } else {
+                        vec![0.0001; config.alt_alleles.len()]
+                    }
                 }
-            }
-        };
-        rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf)
-            .unwrap();
+            };
+            rec.push_info_float(b"PROB_HIGH_VAF", &prob_high_vaf).unwrap();
+        }
 
         // GT
         let mut genotypes = Vec::new();
@@ -1259,6 +1349,97 @@ pub(crate) mod tests {
 
         let result = get_prob_absent(&record, &header, 0, false);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_events_probability_single_event() {
+        // PROB_SOMATIC = 0.9: P(events) = 0.9
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            prob_somatic: Some(vec![0.9]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        let p = get_events_probability(&record, &header, 0, &["somatic".to_string()], false)
+            .unwrap()
+            .unwrap();
+        assert!((p - 0.9).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_get_events_probability_two_events_log_sum() {
+        // PROB_SOMATIC=0.3, PROB_HIGH_VAF=0.4
+        // ln_sum_exp(ln(0.3), ln(0.4)) = ln(0.7) : P(events) ≈ 0.7
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            prob_somatic: Some(vec![0.3]),
+            prob_high_vaf: Some(vec![0.4]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        let p = get_events_probability(
+            &record,
+            &header,
+            0,
+            &["somatic".to_string(), "high_vaf".to_string()],
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        assert!((p - 0.7).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_get_events_probability_phred_scaled() {
+        // PHRED 10: linear 0.1
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            use_phred: true,
+            prob_somatic: Some(vec![10.0]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        let p = get_events_probability(&record, &header, 0, &["somatic".to_string()], true)
+            .unwrap()
+            .unwrap();
+        assert!((p - 0.1).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_get_events_probability_at_boundary_one() {
+        // P=1.0 should not error or exceed 1.0 after log-space
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            prob_somatic: Some(vec![1.0]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        let p = get_events_probability(&record, &header, 0, &["somatic".to_string()], false)
+            .unwrap()
+            .unwrap();
+        assert!((p - 1.0).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_get_events_probability_field_in_header_not_on_record() {
+        // write_prob_somatic: false, PROB_SOMATIC in header but no value on record
+        // function returns Ok(None)
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            write_prob_somatic: false,
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        assert!(
+            get_events_probability(&record, &header, 0, &["somatic".to_string()], false)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
