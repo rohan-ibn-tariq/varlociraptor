@@ -66,15 +66,19 @@ pub fn calculate_percentage_exact(numerator: usize, denominator: usize) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
+pub(crate) mod test_constants {
     /// Tolerance for floating-point comparisons in tests
     pub(crate) const TEST_EPSILON: f64 = 1e-6;
+
     /// Looser tolerance for floating-point comparisons where accumulated
     /// rounding error exceeds TEST_EPSILON — e.g. f32 storage round-trips,
     /// or multi-step probability conversions.
     pub(crate) const TEST_EPSILON_LOOSE: f64 = 1e-5;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn test_phred_to_prob() {
