@@ -10,10 +10,6 @@ use bio::stats::{PHREDProb, Prob};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
-/// Tolerance for floating-point comparisons in tests
-#[cfg(test)]
-pub(crate) const TEST_EPSILON: f64 = 1e-6;
-
 /// Convert PHRED-scaled probability to linear probability.
 ///
 /// PHRED scores encode error probabilities on a logarithmic scale where:
@@ -72,6 +68,13 @@ pub fn calculate_percentage_exact(numerator: usize, denominator: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tolerance for floating-point comparisons in tests
+    pub(crate) const TEST_EPSILON: f64 = 1e-6;
+    /// Looser tolerance for floating-point comparisons where accumulated
+    /// rounding error exceeds TEST_EPSILON — e.g. f32 storage round-trips,
+    /// or multi-step probability conversions.
+    pub(crate) const TEST_EPSILON_LOOSE: f64 = 1e-5;
 
     #[test]
     fn test_phred_to_prob() {
