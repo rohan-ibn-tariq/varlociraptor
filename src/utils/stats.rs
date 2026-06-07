@@ -80,6 +80,8 @@ pub(crate) mod test_constants {
 mod tests {
     use super::*;
 
+    use super::test_constants::TEST_EPSILON;
+
     #[test]
     fn test_phred_to_prob() {
         // Key boundary: PHRED 0 = probability 1.0
