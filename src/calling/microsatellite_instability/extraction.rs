@@ -43,3 +43,20 @@ pub(super) struct RegionSummary {
     /// False means the region only has a dummy indel (no indel observed in reads).
     pub has_real_indel: bool,
 }
+
+/// Statistics collected during extraction.
+#[derive(Debug, Default)]
+pub(super) struct ExtractionStats {
+    /// Total VCF records read (MS and non-MS).
+    pub total_records: usize,
+    /// Records skipped — no REGION_ID, not MS-relevant.
+    pub skipped_non_ms: usize,
+    /// Unique MS regions encountered.
+    pub total_ms_regions: usize,
+    /// Dummy records processed (MSI_DUMMY flag set).
+    pub dummy_records: usize,
+    /// Alleles skipped — FORMAT:AF absent or missing for this sample.
+    pub skipped_missing_af: usize,
+    /// Alleles skipped — event probability field absent or missing.
+    pub skipped_missing_prob: usize,
+}
