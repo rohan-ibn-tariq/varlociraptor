@@ -46,6 +46,42 @@ pub(super) struct RegionSummary {
     pub has_real_indel: bool,
 }
 
+impl RegionSummary {
+    /// Parse a REGION_ID string ("chrom:start-end") into a RegionSummary.
+    ///
+    /// Returns Err if the format is invalid so the caller can warn and skip.
+    fn from_region_id(region_id: &str) -> Result<Self> {
+        let (chrom, coords) =
+            region_id
+                .split_once(':')
+                .ok_or_else(|| Error::MsiRegionIdMalformed {
+                    region_id: region_id.to_string(),
+                    details: "missing ':' separator".to_string(),
+                })?;
+
+        let (start_str, _end_str) =
+            coords
+                .split_once('-')
+                .ok_or_else(|| Error::MsiRegionIdMalformed {
+                    region_id: region_id.to_string(),
+                    details: "missing '-' in coordinate part".to_string(),
+                })?;
+
+        let start: u64 = start_str.parse().map_err(|_| Error::MsiRegionIdMalformed {
+            region_id: region_id.to_string(),
+            details: format!("start '{}' is not a valid integer", start_str),
+        })?;
+
+        Ok(RegionSummary {
+            region_id: region_id.to_string(),
+            chrom: chrom.to_string(),
+            start,
+            variants: Vec::new(),
+            has_real_indel: false,
+        })
+    }
+}
+
 /// Statistics collected during extraction.
 #[derive(Debug, Default)]
 pub(super) struct ExtractionStats {
@@ -61,4 +97,49 @@ pub(super) struct ExtractionStats {
     pub skipped_missing_af: usize,
     /// Alleles skipped — event probability field absent or missing.
     pub skipped_missing_prob: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_htslib::bcf;
+    use tempfile::NamedTempFile;
+
+    use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_LOOSE};
+
+    /* ====== RegionSummary::from_region_id ======= */
+
+    #[test]
+    fn test_from_region_id_valid() {
+        let r = RegionSummary::from_region_id("chr1:1000-2000").unwrap();
+        assert_eq!(r.chrom, "chr1");
+        assert_eq!(r.start, 1000);
+        assert_eq!(r.region_id, "chr1:1000-2000");
+        assert!(!r.has_real_indel);
+        assert!(r.variants.is_empty());
+    }
+
+    #[test]
+    fn test_from_region_id_missing_colon() {
+        let err = RegionSummary::from_region_id("chr1_1000-2000").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("chr1_1000-2000"));
+        assert!(msg.contains("missing ':'"));
+    }
+
+    #[test]
+    fn test_from_region_id_missing_dash() {
+        let err = RegionSummary::from_region_id("chr1:10002000").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("chr1:10002000"));
+        assert!(msg.contains("missing '-'"));
+    }
+
+    #[test]
+    fn test_from_region_id_non_numeric_start() {
+        let err = RegionSummary::from_region_id("chr1:abc-2000").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("chr1:abc-2000"));
+        assert!(msg.contains("not a valid integer"));
+    }
 }
