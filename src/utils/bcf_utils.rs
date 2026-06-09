@@ -321,6 +321,53 @@ pub(crate) fn get_events_probability(
     Ok(Some(prob_events))
 }
 
+/// Extract allele frequency for one sample and one ALT allele.
+///
+/// Reads `FORMAT/AF` at `sample_idx` and `alt_idx`.
+///
+/// # Arguments
+/// * `record`     - VCF record
+/// * `header`     - VCF header
+/// * `sample_idx` - Sample index in FORMAT columns
+/// * `alt_idx`    - ALT allele index (0-based into the ALT array)
+///
+/// # Returns
+/// * `Ok(Some(af))` - AF in [0.0, 1.0]
+/// * `Ok(None)`     - Field absent or value missing
+/// * `Err`          - AF outside [0.0, 1.0] or NaN
+pub(crate) fn get_sample_af(
+    record: &bcf::Record,
+    header: &HeaderView,
+    sample_idx: usize,
+    alt_idx: usize,
+) -> Result<Option<f64>> {
+    let afs = match record.format(b"AF").float() {
+        Ok(a) => a,
+        Err(_) => return Ok(None),
+    };
+
+    let af = match afs.get(sample_idx).and_then(|s| s.get(alt_idx)).copied() {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    if af.is_missing() {
+        return Ok(None);
+    }
+
+    if af.is_nan() || !(0.0..=1.0).contains(&af) {
+        return Err(Error::VcfAlleleFrequencyInvalid {
+            sample: format!("sample_idx={}", sample_idx),
+            af,
+            chrom: get_chrom(record, header)?,
+            pos: record.pos() + 1,
+        }
+        .into());
+    }
+
+    Ok(Some(af as f64))
+}
+
 /// Extract per-sample allele frequencies for a specific ALT allele.
 ///
 /// Reads FORMAT:AF field and returns AF values for each sample
@@ -1441,6 +1488,90 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_get_sample_af_valid_two_samples() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            af_values: Some(vec![0.75, 0.25]),
+            num_samples: 2,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        assert!(
+            (get_sample_af(&record, &header, 0, 0).unwrap().unwrap() - 0.75).abs() < TEST_EPSILON
+        );
+        assert!(
+            (get_sample_af(&record, &header, 1, 0).unwrap().unwrap() - 0.25).abs() < TEST_EPSILON
+        );
+    }
+
+    #[test]
+    fn test_get_sample_af_missing_returns_none() {
+        use rust_htslib::bcf::record::Numeric;
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            af_values: Some(vec![f32::missing()]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        assert!(get_sample_af(&record, &header, 0, 0).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_sample_af_out_of_range_errors() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            af_values: Some(vec![1.5]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        assert!(get_sample_af(&record, &header, 0, 0).is_err());
+    }
+
+    #[test]
+    fn test_get_sample_af_no_field_returns_none() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            af_values: None,
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        assert!(get_sample_af(&record, &header, 0, 0).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_sample_af_multi_alt() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            ref_allele: b"A",
+            alt_alleles: vec![b"AT", b"ATT"],
+            af_values: Some(vec![0.6, 0.3]), // sample1: ALT1=0.6, ALT2=0.3
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        let af0 = get_sample_af(&record, &header, 0, 0).unwrap().unwrap();
+        let af1 = get_sample_af(&record, &header, 0, 1).unwrap().unwrap();
+        assert!((af0 - 0.6).abs() < TEST_EPSILON);
+        assert!((af1 - 0.3).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_get_sample_af_sample_idx_out_of_bounds() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            af_values: Some(vec![0.5]),
+            num_samples: 1,
+            ..Default::default()
+        });
+        let (_, header, record) = read_first_record(tmp_vcf.path());
+
+        // sample_idx=5 doesn't exist — should return None not panic
+        assert!(get_sample_af(&record, &header, 5, 0).unwrap().is_none());
     }
 
     #[test]
