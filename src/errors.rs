@@ -37,6 +37,7 @@
 //! - `Events` - Event validation operations
 //! - `Field` - VCF/BCF field operations etc.
 //! - `Regions` - Genomic regions operations etc.
+//! - `RegionId` - REGION_ID parsing operations etc.
 //!
 //! ## Error Types:
 //! - `Invalid` - Validation failure
@@ -46,6 +47,7 @@
 //! - `Mismatch` - Data inconsistency
 //! -  NoValidRegions - No valid regions
 //! - `Overlapping` - Overlapping BED regions etc.
+//! - `Malformed` - Malformed input (e.g., REGION_ID) etc.
 //!
 //! ## Examples:
 //! - `BedFileInvalid` - Invalid BED file path
@@ -250,6 +252,8 @@ pub(crate) enum Error {
         existing_region: String,
         new_region: String,
     },
+    #[error("Malformed REGION_ID '{region_id}': {details}")]
+    MsiRegionIdMalformed { region_id: String, details: String },
 }
 
 pub(crate) fn invalid_bcf_record(chrom: &str, pos: i64, msg: &str) -> Error {
