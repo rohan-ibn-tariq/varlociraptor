@@ -39,8 +39,10 @@ pub(super) struct RegionSummary {
     pub start: u64,
     /// Variants in this region (real or dummy, ordered by encounter).
     pub variants: Vec<Variant>,
-    /// True if at least one real (non-dummy) indel was observed in this region.
-    /// False means the region only has a dummy indel (no indel observed in reads).
+    /// True if at least one non-dummy indel record was encountered,
+    /// regardless of whether prob or AF extraction succeeded.
+    /// Used to report the "real indel only" MSI score alongside
+    /// the full (real + dummy) score.
     pub has_real_indel: bool,
 }
 
