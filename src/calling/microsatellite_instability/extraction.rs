@@ -88,16 +88,35 @@ pub(super) struct ExtractionStats {
     /// Total VCF records read (MS and non-MS).
     pub total_records: usize,
     /// Records skipped — no REGION_ID, not MS-relevant.
+    /// Includes SNVs and non-perfect indels that passed through preprocessing unchanged.
     pub skipped_non_ms: usize,
-    /// Unique MS regions encountered.
+    /// Unique MS regions encountered — used as the MSI score denominator.
     pub total_ms_regions: usize,
-    /// Dummy records processed (MSI_DUMMY flag set).
+    /// Dummy indel records processed (MSI_DUMMY flag set).
+    /// Each corresponds to a region where no perfect indel was observed in reads.
     pub dummy_records: usize,
     /// Alleles skipped — FORMAT:AF absent or missing for this sample.
     pub skipped_missing_af: usize,
     /// Alleles skipped — event probability field absent or missing.
     pub skipped_missing_prob: usize,
 }
+
+impl ExtractionStats {
+    /// Log extraction statistics alongside region-level counts.
+    pub fn log_stats(&self, regions: &[RegionSummary]) {
+        let with_real = regions.iter().filter(|r| r.has_real_indel).count();
+
+        info!("Extraction statistics:");
+        info!("  Total records read:          {}", self.total_records);
+        info!("  Non-MS records skipped:      {}", self.skipped_non_ms);
+        info!("  Total MS regions:            {}", self.total_ms_regions);
+        info!("  Regions with real indel:     {}", with_real);
+        info!("  Regions with dummy indels:   {}", self.dummy_records);
+        info!("  Alleles skipped (missing AF):   {}", self.skipped_missing_af);
+        info!("  Alleles skipped (missing prob): {}", self.skipped_missing_prob);
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
