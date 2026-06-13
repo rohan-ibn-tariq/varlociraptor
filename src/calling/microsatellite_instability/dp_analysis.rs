@@ -243,7 +243,7 @@ fn run_msi_dp(region_probs: &[RegionProbability]) -> Vec<f64> {
 /// Flat filtered view with region boundary tracking.
 fn filter_regions_by_af<'a>(
     regions: &'a [RegionSummary],
-    sample: &str,
+    // sample: &str, // TODO: REMOVE
     af_threshold: f64,
 ) -> FilteredRegions<'a> {
     let mut all_variants = Vec::new();
@@ -254,12 +254,12 @@ fn filter_regions_by_af<'a>(
         let mut found_any = false;
 
         for variant in &region.variants {
-            if let Some(&af) = variant.sample_afs.get(sample) {
-                if af >= af_threshold {
-                    all_variants.push(variant);
-                    found_any = true;
-                }
+            // if let Some(&af) = variant.sample_afs.get(sample) { // TODO: REMOVE
+            if variant.af >= af_threshold {
+                all_variants.push(variant);
+                found_any = true;
             }
+            // } TODO: REMOVE
         }
 
         if found_any {
