@@ -744,9 +744,9 @@ mod tests {
     #[test]
     fn test_filter_multiple_regions_some_empty() {
         let regions = vec![
-            make_region_simple(vec![make_variant(0.01, 0.8)]),
-            make_region_simple(vec![make_variant(0.02, 0.3)]), // Filtered out
-            make_region_simple(vec![make_variant(0.03, 0.9)]),
+            make_region("chr1:100-130", "chr1", 100, vec![make_variant(0.01, 0.8)], true),
+            make_region("chr1:200-230", "chr1", 200, vec![make_variant(0.02, 0.3)], true), // Filtered out
+            make_region("chr1:300-330", "chr1", 300, vec![make_variant(0.03, 0.9)], true),
         ];
 
         let filtered = filter_regions_by_af(&regions, 0.5);
@@ -852,9 +852,7 @@ mod tests {
 
     #[test]
     fn test_run_af_evolution_analysis_basic() {
-        let regions = vec![RegionSummary {
-            variants: vec![make_variant(0.1, 0.5)],
-        }];
+        let regions = vec![make_region_simple(vec![make_variant(0.1, 0.5)])];
 
         let output_req = OutputRequirements {
             needs_pseudotime: false,
@@ -865,7 +863,7 @@ mod tests {
         let results = run_af_evolution_analysis(
             &regions,
             100,
-            &vec!["sample1".to_string()],
+            "sample1",
             3.5,
             &vec![0.0],
             output_req,
@@ -873,7 +871,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = &results["sample1"]["0.00"];
+        let result = &results["0.00"];
 
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
@@ -896,12 +894,8 @@ mod tests {
     #[test]
     fn test_run_af_evolution_analysis_multiple_af_thresholds() {
         let regions = vec![
-            RegionSummary {
-                variants: vec![make_variant(0.1,0.9)],
-            },
-            RegionSummary {
-                variants: vec![make_variant(0.05,0.5)],
-            },
+            make_region("chr1:100-130", "chr1", 100, vec![make_variant(0.1, 0.9)], true),
+            make_region("chr1:200-230", "chr1", 200, vec![make_variant(0.05, 0.5)], true),
         ];
 
         let output_req = OutputRequirements {
@@ -913,7 +907,7 @@ mod tests {
         let results = run_af_evolution_analysis(
             &regions,
             100,
-            &vec!["sample1".to_string()],
+            "sample1",
             3.5,
             &vec![0.0, 0.5, 1.0],
             output_req,
@@ -921,12 +915,10 @@ mod tests {
         )
         .unwrap();
 
-        // Should have results for all 3 AF thresholds
-        assert_eq!(results.len(), 1, "Should have results for 1 sample");
-        assert_eq!(results["sample1"].len(), 3, "Should have 3 AF thresholds");
+        assert_eq!(results.len(), 3, "Should have 3 AF threshold results");
 
         // AF=1.0: no variants pass (0.9 < 1.0, 0.5 < 1.0)
-        let af_1_0 = &results["sample1"]["1.00"];
+        let af_1_0 = &results["1.00"];
         assert_eq!(
             af_1_0.regions_with_variants.unwrap(),
             0,
@@ -949,7 +941,7 @@ mod tests {
         );
 
         // AF=0.5: both variants pass (0.9 ≥ 0.5, 0.5 ≥ 0.5)
-        let af_0_5 = &results["sample1"]["0.50"];
+        let af_0_5 = &results["0.50"];
         assert_eq!(
             af_0_5.regions_with_variants.unwrap(),
             2,
@@ -970,7 +962,7 @@ mod tests {
         assert!(af_0_5.uncertainty_upper.is_some());
 
         // AF=0.0: both variants pass (all pass)
-        let af_0_0 = &results["sample1"]["0.00"];
+        let af_0_0 = &results["0.00"];
         assert_eq!(
             af_0_0.regions_with_variants.unwrap(),
             2,
