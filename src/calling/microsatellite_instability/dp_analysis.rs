@@ -712,15 +712,13 @@ mod tests {
 
     #[test]
     fn test_filter_by_af_basic() {
-        let regions = vec![RegionSummary {
-            variants: vec![
-                make_variant(0.01, 0.8), // Pass
-                make_variant(0.02, 0.4), // Fail
-                make_variant(0.03, 0.7), // Pass
-            ],
-        }];
+        let regions = vec![make_region_simple(vec![
+            make_variant(0.01, 0.8), // Pass
+            make_variant(0.02, 0.4), // Fail
+            make_variant(0.03, 0.7), // Pass
+        ])];
 
-        let filtered = filter_regions_by_af(&regions, "sample1", 0.6);
+        let filtered = filter_regions_by_af(&regions, 0.6);
 
         assert_eq!(filtered.len(), 1);
         let region_1 = filtered.get_region(0);
@@ -731,53 +729,30 @@ mod tests {
 
     #[test]
     fn test_filter_af_zero_includes_all() {
-        let regions = vec![RegionSummary {
-            variants: vec![
-                make_variant(0.01, 0.0),
-                make_variant(0.02, 0.5),
-                make_variant(0.03, 1.0),
-            ],
-        }];
+        let regions = vec![make_region_simple(vec![
+            make_variant(0.01, 0.0),
+            make_variant(0.02, 0.5),
+            make_variant(0.03, 1.0),
+        ])];
 
-        let filtered = filter_regions_by_af(&regions, "sample1", 0.0);
+        let filtered = filter_regions_by_af(&regions, 0.0);
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered.get_region(0).len(), 3);
     }
 
     #[test]
-    fn test_filter_sample_missing() {
-        let regions = vec![RegionSummary {
-            variants: vec![
-                make_variant(0.01, 0.9), // sample2 missing
-                make_variant(0.02, vec![("sample1", 0.8), ("sample2", 0.7)]),
-            ],
-        }];
-
-        let filtered = filter_regions_by_af(&regions, "sample2", 0.5);
-
-        assert_eq!(filtered.len(), 1);
-        let region_1 = filtered.get_region(0);
-        assert_eq!(region_1.len(), 1); // Only V2
-        assert!((region_1[0].prob_absent - 0.02).abs() < TEST_EPSILON);
-    }
-
-    #[test]
     fn test_filter_multiple_regions_some_empty() {
         let regions = vec![
-            RegionSummary {
-                variants: vec![make_variant(0.01, 0.8)],
-            },
-            RegionSummary {
-                variants: vec![make_variant(0.02, 0.3)], // Filtered out
-            },
-            RegionSummary {
-                variants: vec![make_variant(0.03, 0.9)],
-            },
+            make_region_simple(vec![make_variant(0.01, 0.8)]),
+            make_region_simple(vec![make_variant(0.02, 0.3)]), // Filtered out
+            make_region_simple(vec![make_variant(0.03, 0.9)]),
         ];
 
-        let filtered = filter_regions_by_af(&regions, "sample1", 0.5);
+        let filtered = filter_regions_by_af(&regions, 0.5);
         assert_eq!(filtered.len(), 2); // Only first and third
+        assert!(filtered.get_region(0)[0].af - 0.8 < TEST_EPSILON);
+        assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON);
     }
 
     /* ======= calculate_msi_metrics tests =========== */
