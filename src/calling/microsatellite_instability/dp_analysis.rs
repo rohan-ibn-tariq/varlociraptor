@@ -230,6 +230,40 @@ fn run_msi_dp(region_probs: &[RegionProbability]) -> Vec<f64> {
 
 /* ================================================ */
 
+/* =========== Parallelization Setup ============== */
+
+/// Configure the rayon global thread pool.
+///
+/// Called once at the start of `run_af_evolution_analysis` before
+/// any parallel work begins. Both `run_global_analysis` and
+/// `run_windowed_analysis` share this pool automatically.
+///
+/// Silently falls back to the existing pool if already configured.
+fn setup_thread_pool(num_threads: Option<usize>) {
+    if let Some(threads) = num_threads {
+        // Note: In CLI usage, build_global() should always succeed on first call.
+        // Error handling included for future library usage or testing scenarios.
+        match rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+        {
+            Ok(_) => {
+                info!("Using {} threads (CLI specified)", threads);
+            }
+            Err(_) => {
+                info!(
+                    "Using {} threads (global pool already configured, requested {} ignored)",
+                    rayon::current_num_threads(), threads
+                );
+            }
+        }
+    } else {
+        info!("Using {} threads (rayon default)", rayon::current_num_threads());
+    }
+}
+
+/* ================================================ */
+
 /* === FILTERING REGIONS VARIANTS BY AF============ */
 
 /// Filter regions by AF threshold for a specific sample
@@ -478,28 +512,8 @@ pub(super) fn run_af_evolution_analysis(
     info!("    - Uncertainty metrics: {}", output_req.needs_pseudotime);
     info!("    - Full distribution: {}", output_req.needs_distribution);
 
-    if let Some(threads) = num_threads {
-        // Note: In CLI usage, build_global() should always succeed on first call.
-        // Error handling included for future library usage or testing scenarios.
-        match rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build_global()
-        {
-            Ok(_) => {
-                info!("Using {} threads (CLI specified)", threads);
-            }
-            Err(_) => {
-                let actual_threads = rayon::current_num_threads();
-                info!(
-                    "Using {} threads (global pool already configured, requested {} ignored)",
-                    actual_threads, threads
-                );
-            }
-        }
-    } else {
-        let threads = rayon::current_num_threads();
-        info!("Using {} threads (rayon default)", threads);
-    }
+    // Step 1: Configure rayon thread pool
+    setup_thread_pool(num_threads); // once shared by both analysis functions
 
     // Create all (AF) based work items for parallel processing
     let work_items: Vec<f64> = af_thresholds.to_vec();
