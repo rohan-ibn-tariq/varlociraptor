@@ -555,12 +555,35 @@ mod tests {
 
     use crate::utils::stats::test_constants::TEST_EPSILON;
 
-    // Helper to create test variants
+    /// Create a test Variant with given absence probability and allele frequency.
     fn make_variant(prob: f64, af: f64) -> Variant {
         Variant {
             prob_absent: prob,
             af,
         }
+    }
+
+    /// Create a test RegionSummary with full control over all fields.
+    fn make_region(
+        region_id: &str,
+        chrom: &str,
+        start: u64,
+        variants: Vec<Variant>,
+        has_real_indel: bool,
+    ) -> RegionSummary {
+        RegionSummary {
+            region_id: region_id.to_string(),
+            chrom: chrom.to_string(),
+            start,
+            variants,
+            has_real_indel,
+        }
+    }
+
+    /// Create a test RegionSummary with default location fields.
+    /// Use when the test only cares about variants, not genomic position.
+    fn make_region_simple(variants: Vec<Variant>) -> RegionSummary {
+        make_region("chr1:0-100", "chr1", 0, variants, true)
     }
 
     /* ============ DP Core Tests ==================== */
