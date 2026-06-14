@@ -556,14 +556,10 @@ mod tests {
     use crate::utils::stats::test_constants::TEST_EPSILON;
 
     // Helper to create test variants
-    fn make_variant(prob: f64, afs: Vec<(&str, f64)>) -> Variant {
-        let mut sample_afs = HashMap::new();
-        for (sample, af) in afs {
-            sample_afs.insert(sample.to_string(), af);
-        }
+    fn make_variant(prob: f64, af: f64) -> Variant {
         Variant {
             prob_absent: prob,
-            sample_afs,
+            af,
         }
     }
 
@@ -646,9 +642,9 @@ mod tests {
 
     #[test]
     fn test_filtered_regions_get_region() {
-        let v1 = make_variant(0.01, vec![("s1", 0.8)]);
-        let v2 = make_variant(0.02, vec![("s1", 0.9)]);
-        let v3 = make_variant(0.03, vec![("s1", 0.7)]);
+        let v1 = make_variant(0.01, 0.8);
+        let v2 = make_variant(0.02, 0.9);
+        let v3 = make_variant(0.03, 0.7);
 
         let filtered = FilteredRegions {
             variants: vec![&v1, &v2, &v3],
@@ -669,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_filtered_regions_len() {
-        let v1 = make_variant(0.01, vec![("s1", 0.8)]);
+        let v1 = make_variant(0.01,0.8);
 
         let filtered = FilteredRegions {
             variants: vec![&v1],
@@ -695,9 +691,9 @@ mod tests {
     fn test_filter_by_af_basic() {
         let regions = vec![RegionSummary {
             variants: vec![
-                make_variant(0.01, vec![("sample1", 0.8)]), // Pass
-                make_variant(0.02, vec![("sample1", 0.4)]), // Fail
-                make_variant(0.03, vec![("sample1", 0.7)]), // Pass
+                make_variant(0.01, 0.8), // Pass
+                make_variant(0.02, 0.4), // Fail
+                make_variant(0.03, 0.7), // Pass
             ],
         }];
 
@@ -714,9 +710,9 @@ mod tests {
     fn test_filter_af_zero_includes_all() {
         let regions = vec![RegionSummary {
             variants: vec![
-                make_variant(0.01, vec![("sample1", 0.0)]),
-                make_variant(0.02, vec![("sample1", 0.5)]),
-                make_variant(0.03, vec![("sample1", 1.0)]),
+                make_variant(0.01, 0.0),
+                make_variant(0.02, 0.5),
+                make_variant(0.03, 1.0),
             ],
         }];
 
@@ -730,7 +726,7 @@ mod tests {
     fn test_filter_sample_missing() {
         let regions = vec![RegionSummary {
             variants: vec![
-                make_variant(0.01, vec![("sample1", 0.9)]), // sample2 missing
+                make_variant(0.01, 0.9), // sample2 missing
                 make_variant(0.02, vec![("sample1", 0.8), ("sample2", 0.7)]),
             ],
         }];
@@ -747,13 +743,13 @@ mod tests {
     fn test_filter_multiple_regions_some_empty() {
         let regions = vec![
             RegionSummary {
-                variants: vec![make_variant(0.01, vec![("sample1", 0.8)])],
+                variants: vec![make_variant(0.01, 0.8)],
             },
             RegionSummary {
-                variants: vec![make_variant(0.02, vec![("sample1", 0.3)])], // Filtered out
+                variants: vec![make_variant(0.02, 0.3)], // Filtered out
             },
             RegionSummary {
-                variants: vec![make_variant(0.03, vec![("sample1", 0.9)])],
+                variants: vec![make_variant(0.03, 0.9)],
             },
         ];
 
@@ -791,8 +787,8 @@ mod tests {
 
     #[test]
     fn test_calculate_msi_metrics_with_uncertainty() {
-        let v1 = make_variant(0.1, vec![("sample1", 0.8)]);
-        let v2 = make_variant(0.2, vec![("sample1", 0.9)]);
+        let v1 = make_variant(0.1, 0.8);
+        let v2 = make_variant(0.2, 0.9);
 
         let filtered = FilteredRegions {
             variants: vec![&v1, &v2],
@@ -824,7 +820,7 @@ mod tests {
 
     #[test]
     fn test_calculate_msi_metrics_distribution_only_at_af_zero() {
-        let v1 = make_variant(0.1, vec![("sample1", 0.8)]);
+        let v1 = make_variant(0.1, 0.8);
 
         let filtered = FilteredRegions {
             variants: vec![&v1],
@@ -859,7 +855,7 @@ mod tests {
     #[test]
     fn test_run_af_evolution_analysis_basic() {
         let regions = vec![RegionSummary {
-            variants: vec![make_variant(0.1, vec![("sample1", 0.5)])],
+            variants: vec![make_variant(0.1, 0.5)],
         }];
 
         let output_req = OutputRequirements {
@@ -903,10 +899,10 @@ mod tests {
     fn test_run_af_evolution_analysis_multiple_af_thresholds() {
         let regions = vec![
             RegionSummary {
-                variants: vec![make_variant(0.1, vec![("sample1", 0.9)])],
+                variants: vec![make_variant(0.1,0.9)],
             },
             RegionSummary {
-                variants: vec![make_variant(0.05, vec![("sample1", 0.5)])],
+                variants: vec![make_variant(0.05,0.5)],
             },
         ];
 
