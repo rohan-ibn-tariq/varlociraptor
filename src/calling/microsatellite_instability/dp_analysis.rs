@@ -553,7 +553,7 @@ pub(super) fn run_af_evolution_analysis(
 mod tests {
     use super::*;
 
-    use crate::utils::stats::TEST_EPSILON;
+    use crate::utils::stats::test_constants::TEST_EPSILON;
 
     // Helper to create test variants
     fn make_variant(prob: f64, afs: Vec<(&str, f64)>) -> Variant {
