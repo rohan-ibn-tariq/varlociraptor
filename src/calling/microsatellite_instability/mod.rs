@@ -131,5 +131,18 @@ impl MSIConfig {
 
 /// Orchestrates the MSI calling workflow based on the provided configuration.
 pub fn call_msi(config: MSIConfig) -> Result<()> {
+    // Extract
+    //let (regions, stats) = extract_regions(...)?;
+    // stats.log_stats(&regions);
+
+    // NOTE: Move regions so it gets dropped before the next step, as it may be large
+    // and we want to keep space efficient.
+
+    // let (global, windows) = {
+    //     let r = regions; // move into block
+    //     run_af_evolution_analysis(&r, ...)?
+    //     // r dropped
+    // };
+
     Ok(())
 }
