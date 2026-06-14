@@ -77,6 +77,30 @@ pub(super) struct AfEvolutionResult {
     pub distribution: Option<Vec<DpResult>>,
 }
 
+/// MSI score for one genomic window at one AF threshold.
+///
+/// Forms one cell in the heatmap:
+/// - X-axis: genomic position (`window_start`)
+/// - Y-axis: AF threshold (`af_threshold`)
+/// - Color:  MSI score (`msi_score`)
+///
+/// Produced by `run_windowed_analysis` when `--sliding-window` is specified.
+#[derive(Debug)]
+pub(super) struct WindowResult {
+    /// Chromosome name.
+    pub chrom: String,
+    /// Window start position (0-based, inclusive).
+    pub window_start: u64,
+    /// Window end position (0-based, exclusive).
+    pub window_end: u64,
+    /// AF threshold (Y-axis in heatmap).
+    pub af_threshold: f64,
+    /// MSI score for this window at this AF threshold.
+    pub msi_score: f64,
+    /// Total MS regions in this window - denominator for MSI score.
+    pub regions_in_window: usize,
+}
+
 /// Filtered regions view
 ///
 /// Uses a flat vector of variant references with region boundary indices
@@ -253,12 +277,16 @@ fn setup_thread_pool(num_threads: Option<usize>) {
             Err(_) => {
                 info!(
                     "Using {} threads (global pool already configured, requested {} ignored)",
-                    rayon::current_num_threads(), threads
+                    rayon::current_num_threads(),
+                    threads
                 );
             }
         }
     } else {
-        info!("Using {} threads (rayon default)", rayon::current_num_threads());
+        info!(
+            "Using {} threads (rayon default)",
+            rayon::current_num_threads()
+        );
     }
 }
 
@@ -471,6 +499,54 @@ fn calculate_msi_metrics(
 
 /* ================================================ */
 
+/* ============= AF ANALYSIS UTILITIES ============ */
+
+/// Get a zero-copy sub-slice of regions falling within a genomic window.
+///
+/// # Precondition
+/// `regions` must be sorted by `(chrom, start)`. This should be guaranteed by
+/// `extract_regions`, otherwise results would be incorrect.
+///
+/// Regions must be sorted by (chrom, start) - guaranteed by extraction order.
+///
+/// # Arguments
+/// * `regions`      - All extracted regions sorted by `(chrom, start)`
+/// * `chrom`        - Chromosome to filter for
+/// * `window_start` - Window start position (0-based, inclusive)
+/// * `window_end`   - Window end position (0-based, exclusive)
+///
+/// # Returns
+/// Sub-slice of `regions` whose chrom matches and start falls in
+/// `[window_start, window_end)`. Returns empty slice if no match.
+///
+/// # Example
+/// assert_eq!(get_window_slice(&regions, "chr1", 1000, 2000), &[RegionSummary { chrom: "chr1", start: 1500, ... }]);
+fn get_window_slice<'a>(
+    regions: &'a [RegionSummary],
+    chrom: &str,
+    window_start: u64,
+    window_end: u64,
+) -> &'a [RegionSummary] {
+    // Find first index where chrom matches and start >= window_start
+    let start_idx = regions
+        .iter()
+        .position(|r| r.chrom == chrom && r.start >= window_start);
+
+    let start_idx = match start_idx {
+        Some(i) => i,
+        None => return &[],
+    };
+
+    // Find end index where chrom still matches and start < window_end
+    let end_idx = regions[start_idx..]
+        .iter()
+        .position(|r| r.chrom != chrom || r.start >= window_end)
+        .map(|i| start_idx + i)
+        .unwrap_or(regions.len());
+
+    &regions[start_idx..end_idx]
+}
+
 /* == DP ANALYSIS CORE: RUN AF EVOLUTION ========== */
 
 /// Run AF evolution analysis across AF thresholds for one sample.
@@ -681,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_filtered_regions_len() {
-        let v1 = make_variant(0.01,0.8);
+        let v1 = make_variant(0.01, 0.8);
 
         let filtered = FilteredRegions {
             variants: vec![&v1],
@@ -737,9 +813,27 @@ mod tests {
     #[test]
     fn test_filter_multiple_regions_some_empty() {
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100, vec![make_variant(0.01, 0.8)], true),
-            make_region("chr1:200-230", "chr1", 200, vec![make_variant(0.02, 0.3)], true), // Filtered out
-            make_region("chr1:300-330", "chr1", 300, vec![make_variant(0.03, 0.9)], true),
+            make_region(
+                "chr1:100-130",
+                "chr1",
+                100,
+                vec![make_variant(0.01, 0.8)],
+                true,
+            ),
+            make_region(
+                "chr1:200-230",
+                "chr1",
+                200,
+                vec![make_variant(0.02, 0.3)],
+                true,
+            ), // Filtered out
+            make_region(
+                "chr1:300-330",
+                "chr1",
+                300,
+                vec![make_variant(0.03, 0.9)],
+                true,
+            ),
         ];
 
         let filtered = filter_regions_by_af(&regions, 0.5);
@@ -841,6 +935,73 @@ mod tests {
         assert!(result_af5.distribution.is_none());
     }
 
+    /* ==== AF Analysis Utilities ==================== */
+
+    #[test]
+    fn test_get_window_slice_basic() {
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100, vec![], true),
+            make_region("chr1:500-530", "chr1", 500, vec![], true),
+            make_region("chr1:1100-1130", "chr1", 1100, vec![], true),
+            make_region("chr2:100-130", "chr2", 100, vec![], true),
+        ];
+        let slice = get_window_slice(&regions, "chr1", 0, 1000);
+        assert_eq!(slice.len(), 2);
+        assert_eq!(slice[0].start, 100);
+        assert_eq!(slice[1].start, 500);
+
+        let slice = get_window_slice(&regions, "chr1", 1000, 2000);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].start, 1100);
+
+        let slice = get_window_slice(&regions, "chr2", 0, 1000);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].start, 100);
+    }
+
+    #[test]
+    fn test_get_window_slice_empty_window() {
+        let regions = vec![make_region("chr1:100-130", "chr1", 100, vec![], true)];
+        let slice = get_window_slice(&regions, "chr1", 5000, 6000);
+        assert_eq!(slice.len(), 0);
+    }
+
+    #[test]
+    fn test_get_window_slice_chrom_not_found() {
+        let regions = vec![make_region("chr1:100-130", "chr1", 100, vec![], true)];
+        let slice = get_window_slice(&regions, "chr99", 0, 1000);
+        assert_eq!(slice.len(), 0);
+    }
+
+    #[test]
+    fn test_get_window_slice_all_regions_in_window() {
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100, vec![], true),
+            make_region("chr1:200-230", "chr1", 200, vec![], true),
+        ];
+        let slice = get_window_slice(&regions, "chr1", 0, 1_000_000);
+        assert_eq!(slice.len(), 2);
+    }
+
+    #[test]
+    fn test_get_window_slice_boundary_inclusive_exclusive() {
+        let regions = vec![
+            make_region("chr1:0-30", "chr1", 0, vec![], true),
+            make_region("chr1:1000-1030", "chr1", 1000, vec![], true),
+            make_region("chr1:2000-2030", "chr1", 2000, vec![], true),
+        ];
+
+        // window_start is inclusive: region at exactly window_start=1000 included
+        let slice = get_window_slice(&regions, "chr1", 1000, 1500);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].start, 1000);
+
+        // window_end is exclusive: region at exactly window_end=2000 excluded
+        let slice = get_window_slice(&regions, "chr1", 0, 1000);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].start, 0);
+    }
+
     /* ==== run_af_evolution_analysis tests ========== */
 
     #[test]
@@ -887,8 +1048,20 @@ mod tests {
     #[test]
     fn test_run_af_evolution_analysis_multiple_af_thresholds() {
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100, vec![make_variant(0.1, 0.9)], true),
-            make_region("chr1:200-230", "chr1", 200, vec![make_variant(0.05, 0.5)], true),
+            make_region(
+                "chr1:100-130",
+                "chr1",
+                100,
+                vec![make_variant(0.1, 0.9)],
+                true,
+            ),
+            make_region(
+                "chr1:200-230",
+                "chr1",
+                200,
+                vec![make_variant(0.05, 0.5)],
+                true,
+            ),
         ];
 
         let output_req = OutputRequirements {
