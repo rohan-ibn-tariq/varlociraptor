@@ -279,7 +279,6 @@ fn setup_thread_pool(num_threads: Option<usize>) {
 /// Flat filtered view with region boundary tracking.
 fn filter_regions_by_af<'a>(
     regions: &'a [RegionSummary],
-    // sample: &str, // TODO: REMOVE
     af_threshold: f64,
 ) -> FilteredRegions<'a> {
     let mut all_variants = Vec::new();
@@ -290,12 +289,10 @@ fn filter_regions_by_af<'a>(
         let mut found_any = false;
 
         for variant in &region.variants {
-            // if let Some(&af) = variant.sample_afs.get(sample) { // TODO: REMOVE
             if variant.af >= af_threshold {
                 all_variants.push(variant);
                 found_any = true;
             }
-            // } TODO: REMOVE
         }
 
         if found_any {
@@ -496,13 +493,11 @@ pub(super) fn run_af_evolution_analysis(
     regions: &[RegionSummary],
     total_regions: usize,
     sample: &str,
-    // samples: &[String], // TODO: REMOVE
     msi_high_threshold: f64,
     af_thresholds: &[f64],
     output_req: OutputRequirements,
     num_threads: Option<usize>,
 ) -> Result<HashMap<String, AfEvolutionResult>> {
-    // ) -> Result<HashMap<String, HashMap<String, AfEvolutionResult>>> {  // TODO: REMOVE
     info!("Sample: {:?}", sample);
     info!("AF thresholds: {:?}", af_thresholds);
     info!("MSI-High threshold: {}%", msi_high_threshold);
@@ -518,19 +513,11 @@ pub(super) fn run_af_evolution_analysis(
     // Create all (AF) based work items for parallel processing
     let work_items: Vec<f64> = af_thresholds.to_vec();
 
-    // let work_items: Vec<_> = samples
-    //     .iter()
-    //     .flat_map(|sample| af_thresholds.iter().map(move |&af| (sample.clone(), af)))
-    //     .collect();
-    // TODO: REMOVE
-
     info!("Total parallel tasks: {}", work_items.len());
 
     let results = Mutex::new(HashMap::new());
 
-    // work_items.par_iter().for_each(|(sample, af_threshold)| { TODO: REMOVE
     work_items.par_iter().for_each(|af_threshold| {
-        // let filtered = filter_regions_by_af(regions, sample, *af_threshold); // TODO: REMOVE
         let filtered = filter_regions_by_af(regions, *af_threshold);
 
         let result = calculate_msi_metrics(
@@ -541,14 +528,6 @@ pub(super) fn run_af_evolution_analysis(
             sample.to_string(),
             output_req,
         );
-
-        // let mut results = results.lock().unwrap();
-
-        // results
-        //     .entry(sample.clone())
-        //     .or_insert_with(HashMap::new)
-        //     .insert(format!("{:.2}", af_threshold), result);
-        // TODO: REMOVE
 
         results
             .lock()
