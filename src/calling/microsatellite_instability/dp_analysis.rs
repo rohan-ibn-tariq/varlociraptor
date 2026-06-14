@@ -119,12 +119,15 @@ impl<'a> FilteredRegions<'a> {
 /// which output files the user requested.
 /// - needs_pseudotime: For pseudotime data
 /// - needs_distribution: For distribution data
+/// - needs_heatmap: For heatmap data
 #[derive(Debug, Clone, Copy)]
 pub(super) struct OutputRequirements {
     /// Whether to compute uncertainty bounds (std dev, lower/upper)
     pub needs_pseudotime: bool,
     /// Whether to compute full probability distribution
     pub needs_distribution: bool,
+    /// Whether to compute windowed heatmap analysis
+    pub needs_heatmap: bool,
 }
 
 /* ================================================ */
@@ -236,7 +239,6 @@ fn run_msi_dp(region_probs: &[RegionProbability]) -> Vec<f64> {
 ///
 /// # Arguments
 /// * `regions` - All regions with variants (lifetime 'a)
-/// * `sample` - Sample name to filter for (e.g., "tumor")
 /// * `af_threshold` - Minimum AF
 ///
 /// # Returns
@@ -440,39 +442,34 @@ fn calculate_msi_metrics(
 
 /* == DP ANALYSIS CORE: RUN AF EVOLUTION ========== */
 
-/// Run AF evolution analysis across all samples and AF thresholds
+/// Run AF evolution analysis across AF thresholds for one sample.
 ///
-/// Performs parallel MSI analysis for each (sample, AF threshold) combination,
+/// Performs parallel MSI analysis for each AF threshold,
 /// computing probability distributions and MSI scores.
 ///
-/// # Parallelization Notes:
-/// - Creates work items for all (sample, AF) combinations
-/// - Each worker processes one (sample, AF) independently
-/// - No shared state
-/// - Results collected in thread-safe HashMap
-///
 /// # Arguments
-/// * `regions` - Regions with analyzed variants from intersection
+/// * `regions` - Regions with variants from extraction.
 /// * `total_regions` - Total MS valid regions in BED (for MSI score denominator)
-/// * `samples` - Sample names to analyze
+/// * `sample`        - Sample name (for result labeling)
 /// * `msi_high_threshold` - Threshold for MSI-High classification (percentage)
-/// * `af_thresholds` - AF thresholds to analyze (typically [1.0, 0.8, 0.6, 0.4, 0.2, 0.0] or [0.0])
+/// * `af_thresholds` - AF thresholds to analyze (typically [1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.0] or [0.0])
 /// * `output_req` - Which outputs requested (controls computation)
 /// * `num_threads` - Thread count (None = use rayon default)
 ///
 /// # Returns
-/// Nested HashMap: `sample -> AF threshold (as String) -> MSI result`
-/// ```
+/// HashMap keyed by AF threshold string (e.g. "0.00", "0.50") -> MSI result.
 pub(super) fn run_af_evolution_analysis(
-    regions: &[super::intersection::RegionSummary],
+    regions: &[RegionSummary],
     total_regions: usize,
-    samples: &[String],
+    sample: &str,
+    // samples: &[String], // TODO: REMOVE
     msi_high_threshold: f64,
     af_thresholds: &[f64],
     output_req: OutputRequirements,
     num_threads: Option<usize>,
-) -> Result<HashMap<String, HashMap<String, AfEvolutionResult>>> {
-    info!("Samples: {:?}", samples);
+) -> Result<HashMap<String, AfEvolutionResult>> {
+    // ) -> Result<HashMap<String, HashMap<String, AfEvolutionResult>>> {  // TODO: REMOVE
+    info!("Sample: {:?}", sample);
     info!("AF thresholds: {:?}", af_thresholds);
     info!("MSI-High threshold: {}%", msi_high_threshold);
     info!("Total regions (BED): {}", total_regions);
@@ -504,32 +501,44 @@ pub(super) fn run_af_evolution_analysis(
         info!("Using {} threads (rayon default)", threads);
     }
 
-    // Create all (sample, AF) work items for parallel processing
-    let work_items: Vec<_> = samples
-        .iter()
-        .flat_map(|sample| af_thresholds.iter().map(move |&af| (sample.clone(), af)))
-        .collect();
+    // Create all (AF) based work items for parallel processing
+    let work_items: Vec<f64> = af_thresholds.to_vec();
+
+    // let work_items: Vec<_> = samples
+    //     .iter()
+    //     .flat_map(|sample| af_thresholds.iter().map(move |&af| (sample.clone(), af)))
+    //     .collect();
+    // TODO: REMOVE
 
     info!("Total parallel tasks: {}", work_items.len());
 
     let results = Mutex::new(HashMap::new());
 
-    work_items.par_iter().for_each(|(sample, af_threshold)| {
-        let filtered = filter_regions_by_af(regions, sample, *af_threshold);
+    // work_items.par_iter().for_each(|(sample, af_threshold)| { TODO: REMOVE
+    work_items.par_iter().for_each(|af_threshold| {
+        // let filtered = filter_regions_by_af(regions, sample, *af_threshold); // TODO: REMOVE
+        let filtered = filter_regions_by_af(regions, *af_threshold);
+
         let result = calculate_msi_metrics(
             &filtered,
             total_regions,
             msi_high_threshold,
             *af_threshold,
-            sample.clone(),
+            sample.to_string(),
             output_req,
         );
 
-        let mut results = results.lock().unwrap();
+        // let mut results = results.lock().unwrap();
+
+        // results
+        //     .entry(sample.clone())
+        //     .or_insert_with(HashMap::new)
+        //     .insert(format!("{:.2}", af_threshold), result);
+        // TODO: REMOVE
 
         results
-            .entry(sample.clone())
-            .or_insert_with(HashMap::new)
+            .lock()
+            .unwrap()
             .insert(format!("{:.2}", af_threshold), result);
     });
 
@@ -768,6 +777,7 @@ mod tests {
         let output_req = OutputRequirements {
             needs_pseudotime: false,
             needs_distribution: false,
+            needs_heatmap: false,
         };
 
         let result =
@@ -792,6 +802,7 @@ mod tests {
         let output_req = OutputRequirements {
             needs_pseudotime: true,
             needs_distribution: false,
+            needs_heatmap: false,
         };
 
         let result =
@@ -823,6 +834,7 @@ mod tests {
         let output_req = OutputRequirements {
             needs_pseudotime: false,
             needs_distribution: true,
+            needs_heatmap: false,
         };
 
         // AF=0.0 should include distribution
@@ -853,6 +865,7 @@ mod tests {
         let output_req = OutputRequirements {
             needs_pseudotime: false,
             needs_distribution: true,
+            needs_heatmap: false,
         };
 
         let results = run_af_evolution_analysis(
@@ -900,6 +913,7 @@ mod tests {
         let output_req = OutputRequirements {
             needs_pseudotime: true,
             needs_distribution: false,
+            needs_heatmap: false,
         };
 
         let results = run_af_evolution_analysis(
