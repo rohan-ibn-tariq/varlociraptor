@@ -585,6 +585,102 @@ fn get_window_slice<'a>(
     &regions[start_idx..end_idx]
 }
 
+/* ============ Windowed Analysis ================= */
+
+/// Compute windowed MSI scores across the genome.
+///
+/// Slides a window of `window_size` bases across each chromosome,
+/// computing MSI score and posterior probability per window using
+/// a single fixed AF threshold. Only windows containing at least
+/// one MS region are included.
+///
+/// Per-window denominator (`regions_in_window`) makes windows
+/// spatially comparable - each score reflects instability fraction
+/// within that window, not genome-wide.
+///
+/// # Arguments
+/// * `regions`      - All extracted regions sorted by `(chrom, start)`
+/// * `af_threshold` - Fixed AF threshold from `--af-threshold-windowed`
+/// * `window_size`  - Window width in bases (e.g. 1_000_000 for 1Mb)
+///
+/// # Returns
+/// Vec of `WindowResult` ordered by `(chrom, window_start)`.`
+///
+/// # Example
+/// assert_eq!(run_windowed_analysis(&regions, 0.1, 1_000_000), vec![WindowResult { chrom: "chr1", window_start: 0, window_end: 1_000_000, msi_score: 2.5, posterior_probability: 0.8, regions_in_window: 40 }, ...]);
+fn run_windowed_analysis(
+    regions: &[RegionSummary],
+    af_threshold: f64,
+    window_size: u64,
+) -> Vec<WindowResult> {
+    if regions.is_empty() || window_size == 0 {
+        return Vec::new();
+    }
+
+    // Collect unique chromosomes in first-encounter (genomic) order
+    let mut chroms: Vec<&str> = Vec::new();
+    for region in regions {
+        if !chroms.contains(&region.chrom.as_str()) {
+            chroms.push(&region.chrom);
+        }
+    }
+
+    // Build (chrom, window_start) work items - single AF
+    let work_items: Vec<(&str, u64)> = chroms
+        .iter()
+        .flat_map(|&chrom| {
+            let max_start = regions
+                .iter()
+                .filter(|r| r.chrom == chrom)
+                .map(|r| r.start)
+                .max()
+                .unwrap_or(0);
+            let highest_window_idx = max_start / window_size;
+            let n_windows = highest_window_idx + 1;
+            (0..n_windows).map(move |w| (chrom, w * window_size))
+        })
+        .collect();
+
+    let results = Mutex::new(Vec::new());
+
+    work_items.par_iter().for_each(|&(chrom, window_start)| {
+        let window_end = window_start + window_size;
+
+        // Zero-copy sub-slice for this window
+        let window_slice = get_window_slice(regions, chrom, window_start, window_end);
+        if window_slice.is_empty() {
+            return;
+        }
+
+        let regions_in_window = window_slice.len();
+
+        let filtered = filter_regions_by_af(window_slice, af_threshold);
+
+        let dist = run_dp_for_regions(&filtered);
+        let (_, msi_score, posterior_probability) = find_map_estimate(&dist, regions_in_window);
+
+        results.lock().unwrap().push(WindowResult {
+            chrom: chrom.to_string(),
+            window_start,
+            window_end,
+            msi_score,
+            posterior_probability,
+            regions_in_window,
+        });
+    });
+
+    let mut all_results = results.into_inner().unwrap();
+
+    // Sort by (chrom, window_start)
+    all_results.sort_by(|a, b| {
+        a.chrom
+            .cmp(&b.chrom)
+            .then(a.window_start.cmp(&b.window_start))
+    });
+
+    all_results
+}
+
 /* == DP ANALYSIS CORE: RUN AF EVOLUTION ========== */
 
 /// Run AF evolution analysis across AF thresholds for one sample.
