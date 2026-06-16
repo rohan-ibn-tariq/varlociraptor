@@ -336,7 +336,62 @@ fn filter_regions_by_af<'a>(
 
 /* ================================================ */
 
-/* ============ Calculate MSI Metrics ============= */
+/* ============= MSI Metrics ====================== */
+
+/// Compute DP probability distribution from pre-filtered regions.
+///
+/// Converts filtered regions into region stability probabilities
+/// then runs the DP algorithm to get P(k regions unstable).
+///
+/// # Arguments
+/// * `filtered` - Pre-filtered region view from `filter_regions_by_af`
+///
+/// # Returns
+/// Probability distribution `[P(0 unstable), ..., P(n unstable)]`
+/// summing to 1.0. Returns `[1.0]` if no regions passed filtering.
+fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
+    let region_probs: Vec<RegionProbability> = (0..filtered.len())
+        .map(|i| {
+            let p_all_absent: f64 = filtered
+                .get_region(i)
+                .iter()
+                .map(|v| v.prob_absent)
+                .product();
+            RegionProbability {
+                p_stable: p_all_absent,
+            }
+        })
+        .collect();
+
+    if region_probs.is_empty() {
+        vec![1.0]
+    } else {
+        run_msi_dp(&region_probs)
+    }
+}
+
+/// Find MAP estimate and MSI score from a DP distribution.
+///
+/// Finds k that maximizes P(K=k) - the maximum a posteriori estimate
+/// of unstable region count. Ties broken by taking the highest k.
+///
+/// # Arguments
+/// * `dist`          - DP probability distribution from `run_dp_for_regions`
+/// * `total_regions` - Denominator for MSI score (total MS regions)
+///
+/// # Returns
+/// `(k_map, msi_score)` where `msi_score = k_map / total_regions × 100`
+fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64) {
+    let k_map = dist
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .map(|(k, _)| k)
+        .unwrap_or(0);
+
+    let msi_score = calculate_percentage_exact(k_map, total_regions);
+    (k_map, msi_score)
+}
 
 /// Calculate MSI metrics for filtered regions
 ///
@@ -398,7 +453,6 @@ fn calculate_msi_metrics(
             let k_map = distribution_raw
                 .iter()
                 .enumerate()
-                .rev() // Reverse to get LAST maximum (solves the problem of equal probabilities)
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                 .map(|(k, _)| k)
                 .unwrap_or(0);
@@ -840,6 +894,108 @@ mod tests {
         assert_eq!(filtered.len(), 2); // Only first and third
         assert!(filtered.get_region(0)[0].af - 0.8 < TEST_EPSILON);
         assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON);
+    }
+
+    /* ======= MSI Metrics tests ===================== */
+    /* ======= run_dp_for_regions tests ============== */
+
+    #[test]
+    fn test_run_dp_for_regions_empty() {
+        let filtered = FilteredRegions {
+            variants: vec![],
+            region_starts: vec![],
+        };
+        let dist = run_dp_for_regions(&filtered);
+        assert_eq!(dist, vec![1.0]);
+    }
+
+    #[test]
+    fn test_run_dp_for_regions_single_region() {
+        // prob_absent=0.7, p_stable=0.7
+        let v = make_variant(0.7, 0.8);
+        let filtered = FilteredRegions {
+            variants: vec![&v],
+            region_starts: vec![0],
+        };
+        let dist = run_dp_for_regions(&filtered);
+        assert_eq!(dist.len(), 2);
+        assert!((dist[0] - 0.7).abs() < TEST_EPSILON); // P(0 unstable)
+        assert!((dist[1] - 0.3).abs() < TEST_EPSILON); // P(1 unstable)
+    }
+
+    #[test]
+    fn test_run_dp_for_regions_sums_to_one() {
+        let v1 = make_variant(0.3, 0.8);
+        let v2 = make_variant(0.5, 0.9);
+        let v3 = make_variant(0.7, 0.7);
+        let filtered = FilteredRegions {
+            variants: vec![&v1, &v2, &v3],
+            region_starts: vec![0, 1, 2],
+        };
+        let dist = run_dp_for_regions(&filtered);
+        let sum: f64 = dist.iter().sum();
+        assert!((sum - 1.0).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_run_dp_for_regions_multiple_variants_per_region() {
+        // Region with two variants: p_stable = 0.3 × 0.5 = 0.15
+        let v1 = make_variant(0.3, 0.8);
+        let v2 = make_variant(0.5, 0.9);
+        let filtered = FilteredRegions {
+            variants: vec![&v1, &v2],
+            region_starts: vec![0], // one region with two variants
+        };
+        let dist = run_dp_for_regions(&filtered);
+        assert_eq!(dist.len(), 2);
+        assert!((dist[0] - 0.15).abs() < TEST_EPSILON); // P(0) = 0.15
+        assert!((dist[1] - 0.85).abs() < TEST_EPSILON); // P(1) = 0.85
+    }
+
+    /* ======= find_map_estimate tests =============== */
+
+    #[test]
+    fn test_find_map_estimate_basic() {
+        // P(0)=0.42, P(1)=0.46, P(2)=0.12, k_map=1
+        let dist = vec![0.42, 0.46, 0.12];
+        let (k_map, score) = find_map_estimate(&dist, 2);
+        assert_eq!(k_map, 1);
+        assert!((score - 50.0).abs() < TEST_EPSILON); // 1/2 × 100
+    }
+
+    #[test]
+    fn test_find_map_estimate_tie_takes_higher_k() {
+        // Equal probabilities, higher k wins
+        let dist = vec![0.5, 0.5];
+        let (k_map, _) = find_map_estimate(&dist, 10);
+        assert_eq!(k_map, 1); // higher k wins on tie
+    }
+
+    #[test]
+    fn test_find_map_estimate_all_stable() {
+        // P(0)=1.0, k_map=0, score=0%
+        let dist = vec![1.0, 0.0];
+        let (k_map, score) = find_map_estimate(&dist, 2);
+        assert_eq!(k_map, 0);
+        assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn test_find_map_estimate_all_unstable() {
+        // P(2)=1.0, k_map=2, score=100%
+        let dist = vec![0.0, 0.0, 1.0];
+        let (k_map, score) = find_map_estimate(&dist, 2);
+        assert_eq!(k_map, 2);
+        assert!((score - 100.0).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_find_map_estimate_denominator() {
+        // k_map=2, total=10, 2/10 × 100 = 20%
+        let dist = vec![0.1, 0.2, 0.7];
+        let (k_map, score) = find_map_estimate(&dist, 10);
+        assert_eq!(k_map, 2);
+        assert!((score - 20.0).abs() < TEST_EPSILON);
     }
 
     /* ======= calculate_msi_metrics tests =========== */
