@@ -371,7 +371,7 @@ fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
     }
 }
 
-/// Find MAP estimate and MSI score from a DP distribution.
+/// Find MAP estimate, MSI score, and posterior probability from a DP distribution.
 ///
 /// Finds k that maximizes P(K=k) - the maximum a posteriori estimate
 /// of unstable region count. Ties broken by taking the highest k.
@@ -381,8 +381,10 @@ fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
 /// * `total_regions` - Denominator for MSI score (total MS regions)
 ///
 /// # Returns
-/// `(k_map, msi_score)` where `msi_score = k_map / total_regions × 100`
-fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64) {
+/// `(k_map, msi_score, posterior_probability)` where:
+/// - `msi_score = k_map / total_regions × 100`
+/// - `posterior_probability = P(k=k_map)` - confidence in the estimate
+fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
     let k_map = dist
         .iter()
         .enumerate()
@@ -391,7 +393,9 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64) {
         .unwrap_or(0);
 
     let msi_score = calculate_percentage_exact(k_map, total_regions);
-    (k_map, msi_score)
+    let posterior_probability = dist.get(k_map).copied().unwrap_or(0.0);
+
+    (k_map, msi_score, posterior_probability)
 }
 
 /// Calculate MSI metrics for filtered regions
