@@ -77,14 +77,15 @@ pub(super) struct AfEvolutionResult {
     pub distribution: Option<Vec<DpResult>>,
 }
 
-/// MSI score for one genomic window at one AF threshold.
+/// MSI score for one genomic window.
 ///
-/// Forms one cell in the heatmap:
+/// Forms one data point in the windowed plot:
 /// - X-axis: genomic position (`window_start`)
-/// - Y-axis: AF threshold (`af_threshold`)
-/// - Color:  MSI score (`msi_score`)
+/// - Y-axis: MSI score (`msi_score`)
+/// - Color:  posterior probability (`posterior_probability`)
 ///
 /// Produced by `run_windowed_analysis` when `--sliding-window` is specified.
+/// The fixed AF threshold used is configured via `--af-threshold-windowed`.
 #[derive(Debug)]
 pub(super) struct WindowResult {
     /// Chromosome name.
@@ -93,10 +94,10 @@ pub(super) struct WindowResult {
     pub window_start: u64,
     /// Window end position (0-based, exclusive).
     pub window_end: u64,
-    /// AF threshold (Y-axis in heatmap).
-    pub af_threshold: f64,
-    /// MSI score for this window at this AF threshold.
+    /// MSI score for this window (k_map / regions_in_window × 100).
     pub msi_score: f64,
+    /// P(k=k_map) from DP distribution.
+    pub posterior_probability: f64,
     /// Total MS regions in this window - denominator for MSI score.
     pub regions_in_window: usize,
 }
