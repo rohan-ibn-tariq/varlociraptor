@@ -963,44 +963,50 @@ mod tests {
     fn test_find_map_estimate_basic() {
         // P(0)=0.42, P(1)=0.46, P(2)=0.12, k_map=1
         let dist = vec![0.42, 0.46, 0.12];
-        let (k_map, score) = find_map_estimate(&dist, 2);
+        let (k_map, score, posterior_probability) = find_map_estimate(&dist, 2);
         assert_eq!(k_map, 1);
         assert!((score - 50.0).abs() < TEST_EPSILON); // 1/2 × 100
+        assert!((posterior_probability - 0.46).abs() < TEST_EPSILON); // P(k=1)
     }
 
     #[test]
     fn test_find_map_estimate_tie_takes_higher_k() {
         // Equal probabilities, higher k wins
         let dist = vec![0.5, 0.5];
-        let (k_map, _) = find_map_estimate(&dist, 10);
+        let (k_map, _, posterior_probability) = find_map_estimate(&dist, 10);
         assert_eq!(k_map, 1); // higher k wins on tie
+        assert!((posterior_probability - 0.5).abs() < TEST_EPSILON);
     }
 
     #[test]
     fn test_find_map_estimate_all_stable() {
         // P(0)=1.0, k_map=0, score=0%
         let dist = vec![1.0, 0.0];
-        let (k_map, score) = find_map_estimate(&dist, 2);
+        let (k_map, score, posterior_probability) = find_map_estimate(&dist, 2);
         assert_eq!(k_map, 0);
         assert_eq!(score, 0.0);
+        assert!((posterior_probability - 1.0).abs() < TEST_EPSILON);
     }
 
     #[test]
     fn test_find_map_estimate_all_unstable() {
         // P(2)=1.0, k_map=2, score=100%
         let dist = vec![0.0, 0.0, 1.0];
-        let (k_map, score) = find_map_estimate(&dist, 2);
+        let (k_map, score, posterior_probability) = find_map_estimate(&dist, 2);
         assert_eq!(k_map, 2);
         assert!((score - 100.0).abs() < TEST_EPSILON);
+        assert!((posterior_probability - 1.0).abs() < TEST_EPSILON);
     }
 
     #[test]
     fn test_find_map_estimate_denominator() {
         // k_map=2, total=10, 2/10 × 100 = 20%
+        // Note: this also covers test_find_map_estimate_posterior_is_max_probability, as 0.7 is the max probability at k=2
         let dist = vec![0.1, 0.2, 0.7];
-        let (k_map, score) = find_map_estimate(&dist, 10);
+        let (k_map, score, posterior_probability) = find_map_estimate(&dist, 10);
         assert_eq!(k_map, 2);
         assert!((score - 20.0).abs() < TEST_EPSILON);
+        assert!((posterior_probability - 0.7).abs() < TEST_EPSILON);
     }
 
     /* ======= calculate_msi_metrics tests =========== */
