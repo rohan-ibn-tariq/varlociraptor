@@ -353,11 +353,13 @@ fn filter_regions_by_af<'a>(
 fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
     let region_probs: Vec<RegionProbability> = (0..filtered.len())
         .map(|i| {
+            // P(all variants absent) = Π(p_absent)
             let p_all_absent: f64 = filtered
                 .get_region(i)
                 .iter()
                 .map(|v| v.prob_absent)
                 .product();
+
             RegionProbability {
                 p_stable: p_all_absent,
             }
@@ -365,7 +367,7 @@ fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
         .collect();
 
     if region_probs.is_empty() {
-        vec![1.0]
+        vec![1.0] // P(0 unstable) = 1.0
     } else {
         run_msi_dp(&region_probs)
     }
@@ -431,49 +433,26 @@ fn calculate_msi_metrics(
 ) -> AfEvolutionResult {
     // Step 1: Compute region instability probabilities
     // For each region, calculate P(at least one variant present)
-    let region_probs: Vec<RegionProbability> = (0..filtered.len())
-        .map(|i| {
-            let region_variants = filtered.get_region(i);
-
-            // P(all variants absent) = Π(p_absent)
-            let p_all_absent: f64 = region_variants.iter().map(|v| v.prob_absent).product();
-
-            RegionProbability {
-                p_stable: p_all_absent,
-            }
-        })
-        .collect();
-
+    // &
     // Step 2: Run DP to get probability distribution
-    let distribution_raw = if !region_probs.is_empty() {
-        run_msi_dp(&region_probs)
-    } else {
-        vec![1.0] // No regions → P(0 unstable) = 1.0
-    };
+    let distribution_raw = run_dp_for_regions(filtered);
 
     // Step 3: Compute k_map, msi_score_map, regions_with_variants, msi_status ONLY if pseudotime needed
-    let (k_map, msi_score_map, msi_status, regions_with_variants) =
-        if output_req.needs_pseudotime && total_regions > 0 {
-            // Note: partial_cmp is safe here because upstream validation ensures no NaN values.
-            let k_map = distribution_raw
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(k, _)| k)
-                .unwrap_or(0);
-            let regions_with_variants = region_probs.len();
-            let msi_score_map = calculate_percentage_exact(k_map, total_regions);
-            let msi_status = classify_msi_status(msi_score_map, msi_high_threshold).to_string();
-
-            (
-                Some(k_map),
-                Some(msi_score_map),
-                Some(msi_status),
-                Some(regions_with_variants),
-            )
-        } else {
-            (None, None, None, None)
-        };
+    let (k_map, msi_score_map, msi_status, regions_with_variants) = if output_req.needs_pseudotime
+        && total_regions > 0
+    {
+        let (k_map_raw, msi_score_map_raw, _) = find_map_estimate(&distribution_raw, total_regions);
+        let regions_with_variants_count = filtered.len();
+        let msi_status = classify_msi_status(msi_score_map_raw, msi_high_threshold).to_string();
+        (
+            Some(k_map_raw),
+            Some(msi_score_map_raw),
+            Some(msi_status),
+            Some(regions_with_variants_count),
+        )
+    } else {
+        (None, None, None, None)
+    };
 
     // Step 4: Calculate uncertainty using exact Decimal arithmetic
     let (uncertainty_lower, uncertainty_upper, map_std_dev) =
