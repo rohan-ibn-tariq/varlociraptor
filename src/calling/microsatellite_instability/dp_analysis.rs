@@ -1244,6 +1244,102 @@ mod tests {
         assert_eq!(slice[0].start, 0);
     }
 
+    /* ======= run_windowed_analysis tests ============ */
+
+    #[test]
+    fn test_run_windowed_analysis_basic() {
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100,
+                vec![make_variant(0.1, 0.8)], true),
+            make_region("chr1:200-230", "chr1", 200,
+                vec![make_variant(0.2, 0.9)], true),
+            make_region("chr2:100-130", "chr2", 100,
+                vec![make_variant(0.3, 0.7)], true),
+        ];
+        let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
+
+        // chr1: 1 window, chr2: 1 window = 2 results
+        assert_eq!(results.len(), 2);
+
+        // chr1: 2 regions, p_stable=[0.1, 0.2]
+        // P(2)=0.9×0.8=0.72, k_map=2, score=2/2×100=100%, posterior=0.72
+        assert_eq!(results[0].chrom, "chr1");
+        assert_eq!(results[0].window_start, 0);
+        assert_eq!(results[0].regions_in_window, 2);
+        assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((results[0].posterior_probability - 0.72).abs() < TEST_EPSILON);
+
+        // chr2: 1 region, p_stable=0.3
+        // P(1)=0.7 > P(0)=0.3, k_map=1, score=1/1×100=100%, posterior=0.7
+        assert_eq!(results[1].chrom, "chr2");
+        assert_eq!(results[1].regions_in_window, 1);
+        assert!((results[1].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((results[1].posterior_probability - 0.7).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_run_windowed_analysis_empty_window_excluded() {
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100,
+                vec![make_variant(0.1, 0.8)], true),
+            make_region("chr1:5000100-5000130", "chr1", 5_000_100,
+                vec![make_variant(0.2, 0.9)], true),
+        ];
+        let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
+
+        // Only 2 non-empty windows: 0 and 5_000_000
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].window_start, 0);
+        assert_eq!(results[1].window_start, 5_000_000);
+    }
+
+    #[test]
+    fn test_run_windowed_analysis_empty_regions() {
+        let regions: Vec<RegionSummary> = vec![];
+        let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_run_windowed_analysis_zero_window_size() {
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100,
+                vec![make_variant(0.1, 0.8)], true),
+        ];
+        let results = run_windowed_analysis(&regions, 0.1, 0);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_run_windowed_analysis_af_filter_applied() {
+        // All variants have af=0.05, below threshold 0.1 - filtered out
+        // Region exists but no variants pass, msi_score=0, posterior=1.0
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100,
+                vec![make_variant(0.1, 0.05)], true),
+        ];
+        let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].msi_score, 0.0);
+        assert!((results[0].posterior_probability - 1.0).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_run_windowed_analysis_uses_per_window_denominator() {
+        // 2 regions in window, both unstable, k_map=2, score=2/2×100=100%
+        // Windowed uses per-window denominator
+        let regions = vec![
+            make_region("chr1:100-130", "chr1", 100,
+                vec![make_variant(0.01, 0.8)], true),
+            make_region("chr1:200-230", "chr1", 200,
+                vec![make_variant(0.01, 0.9)], true),
+        ];
+        let results = run_windowed_analysis(&regions, 0.0, 1_000_000);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].regions_in_window, 2);
+        assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON);
+    }
+
     /* ==== run_af_evolution_analysis tests ========== */
 
     #[test]
