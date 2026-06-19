@@ -419,19 +419,19 @@ mod tests {
     fn test_validate_bed_file_valid() {
         let tmp = NamedTempFile::new().unwrap();
         writeln!(tmp.as_file(), "chr1\t100\t109\t3xCAG").unwrap();
-        assert!(validate_bed_file(&tmp.path().to_path_buf()).is_ok());
+        assert!(validate_bed_file(tmp.path()).is_ok());
     }
 
     #[test]
     fn test_validate_bed_file_empty() {
         let tmp = NamedTempFile::new().unwrap();
-        assert!(validate_bed_file(&tmp.path().to_path_buf()).is_err());
+        assert!(validate_bed_file(tmp.path()).is_err());
     }
 
     #[test]
     fn test_validate_bed_file_invalid_record() {
         let tmp = NamedTempFile::new().unwrap();
         writeln!(tmp.as_file(), "chr1\t100\t200").unwrap(); // Missing name
-        assert!(validate_bed_file(&tmp.path().to_path_buf()).is_err());
+        assert!(validate_bed_file(tmp.path()).is_err());
     }
 }
