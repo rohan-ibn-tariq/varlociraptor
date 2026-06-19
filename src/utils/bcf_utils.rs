@@ -83,6 +83,8 @@ pub(crate) fn get_chrom(record: &bcf::Record, header: &HeaderView) -> Result<Str
         pos: record.pos() + 1,
     })?;
 
+    record.header();
+
     let chrom_bytes = header
         .rid2name(rid)
         .map_err(|_| Error::VcfRecordChromResolveFailed {
@@ -131,115 +133,115 @@ pub(crate) fn get_svlen(
 }
 
 // TODO: Remove this function when old estimate MSI code removed.
-/// Get combined probability that variant is absent (artifact)
-///
-/// Extracts and combines two sources of artifact evidence:
-/// 1. PROBABILITY_ABSENT tag: Primary absent probability
-/// 2. PROBABILITY_ARTIFACT tag: Additional artifact probability
-///
-/// NOTE: Both can be either PHRED-scaled or direct probabilities.
-///
-/// # Formula
-/// ```text
-/// P(absent) = P(artifact_PA) + P(artifact_ART)
-/// ```
-/// Notes: Currently caters Phred and Linear Prob.
-/// Check if LogProb is also possible and extend accordingly if required.
-///
-/// # Arguments
-/// * `record` - VCF record
-/// * `header` - VCF header (for error messages)
-/// * `alt_idx` - ALT allele index (0 = first ALT)
-/// * `is_phred` - Whether probabilities are PHRED-scaled
-///
-/// # Returns
-/// - `Some(prob)` if both PROB_ABSENT and PROB_ARTIFACT exist for this ALT
-/// - `None` if either tag is missing or missing at this ALT index
-///
-/// # Errors
-/// Returns error if:
-/// - Probability is NaN
-/// - Final combined probability is outside [0, 1]
-pub(crate) fn get_prob_absent(
-    record: &bcf::Record,
-    header: &HeaderView,
-    alt_idx: usize,
-    is_phred: bool,
-) -> Result<Option<f64>> {
-    let prob_absent = match record.info(b"PROB_ABSENT").float()? {
-        Some(p) if alt_idx < p.len() => p[alt_idx],
-        _ => return Ok(None),
-    };
+// /// Get combined probability that variant is absent (artifact)
+// ///
+// /// Extracts and combines two sources of artifact evidence:
+// /// 1. PROBABILITY_ABSENT tag: Primary absent probability
+// /// 2. PROBABILITY_ARTIFACT tag: Additional artifact probability
+// ///
+// /// NOTE: Both can be either PHRED-scaled or direct probabilities.
+// ///
+// /// # Formula
+// /// ```text
+// /// P(absent) = P(artifact_PA) + P(artifact_ART)
+// /// ```
+// /// Notes: Currently caters Phred and Linear Prob.
+// /// Check if LogProb is also possible and extend accordingly if required.
+// ///
+// /// # Arguments
+// /// * `record` - VCF record
+// /// * `header` - VCF header (for error messages)
+// /// * `alt_idx` - ALT allele index (0 = first ALT)
+// /// * `is_phred` - Whether probabilities are PHRED-scaled
+// ///
+// /// # Returns
+// /// - `Some(prob)` if both PROB_ABSENT and PROB_ARTIFACT exist for this ALT
+// /// - `None` if either tag is missing or missing at this ALT index
+// ///
+// /// # Errors
+// /// Returns error if:
+// /// - Probability is NaN
+// /// - Final combined probability is outside [0, 1]
+// pub(crate) fn get_prob_absent(
+//     record: &bcf::Record,
+//     header: &HeaderView,
+//     alt_idx: usize,
+//     is_phred: bool,
+// ) -> Result<Option<f64>> {
+//     let prob_absent = match record.info(b"PROB_ABSENT").float()? {
+//         Some(p) if alt_idx < p.len() => p[alt_idx],
+//         _ => return Ok(None),
+//     };
 
-    let prob_artifact = match record.info(b"PROB_ARTIFACT").float()? {
-        Some(p) if alt_idx < p.len() => p[alt_idx],
-        _ => return Ok(None),
-    };
+//     let prob_artifact = match record.info(b"PROB_ARTIFACT").float()? {
+//         Some(p) if alt_idx < p.len() => p[alt_idx],
+//         _ => return Ok(None),
+//     };
 
-    if prob_absent.is_missing() || prob_artifact.is_missing() {
-        return Ok(None);
-    }
+//     if prob_absent.is_missing() || prob_artifact.is_missing() {
+//         return Ok(None);
+//     }
 
-    if prob_absent.is_nan() {
-        return Err(Error::VcfProbabilityValueInvalid {
-            field: "PROB_ABSENT".to_string(),
-            value: prob_absent,
-            chrom: get_chrom(record, header)?,
-            pos: record.pos() + 1,
-        }
-        .into());
-    }
+//     if prob_absent.is_nan() {
+//         return Err(Error::VcfProbabilityValueInvalid {
+//             field: "PROB_ABSENT".to_string(),
+//             value: prob_absent,
+//             chrom: get_chrom(record, header)?,
+//             pos: record.pos() + 1,
+//         }
+//         .into());
+//     }
 
-    if prob_artifact.is_nan() {
-        return Err(Error::VcfProbabilityValueInvalid {
-            field: "PROB_ARTIFACT".to_string(),
-            value: prob_artifact,
-            chrom: get_chrom(record, header)?,
-            pos: record.pos() + 1,
-        }
-        .into());
-    }
+//     if prob_artifact.is_nan() {
+//         return Err(Error::VcfProbabilityValueInvalid {
+//             field: "PROB_ARTIFACT".to_string(),
+//             value: prob_artifact,
+//             chrom: get_chrom(record, header)?,
+//             pos: record.pos() + 1,
+//         }
+//         .into());
+//     }
 
-    let probability_absent = if is_phred {
-        phred_to_prob(prob_absent as f64)
-    } else {
-        prob_absent as f64
-    };
+//     let probability_absent = if is_phred {
+//         phred_to_prob(prob_absent as f64)
+//     } else {
+//         prob_absent as f64
+//     };
 
-    let probability_artifact = if is_phred {
-        phred_to_prob(prob_artifact as f64)
-    } else {
-        prob_artifact as f64
-    };
+//     let probability_artifact = if is_phred {
+//         phred_to_prob(prob_artifact as f64)
+//     } else {
+//         prob_artifact as f64
+//     };
 
-    let probability = probability_absent + probability_artifact;
+//     let probability = probability_absent + probability_artifact;
 
-    // Optional: Adjust with gnomAD population frequency
-    let gnomad_af = match record.info(b"POPULATION_AF").float() {
-        Ok(Some(p)) if alt_idx < p.len() && !p[alt_idx].is_missing() => p[alt_idx] as f64,
-        Ok(Some(_)) | Ok(None) | Err(_) => 0.0, // Missing/invalid: use 0.0
-    };
+//     // Optional: Adjust with gnomAD population frequency
+//     let gnomad_af = match record.info(b"POPULATION_AF").float() {
+//         Ok(Some(p)) if alt_idx < p.len() && !p[alt_idx].is_missing() => p[alt_idx] as f64,
+//         Ok(Some(_)) | Ok(None) | Err(_) => 0.0, // Missing/invalid: use 0.0
+//     };
 
-    // Efficient calculation:
-    // prob_absent_final = 1 - ((1 - prob_absent_base) × (1 - gnomad_af))
-    // Expanded: prob_absent_base + gnomad_af × (1 - prob_absent_base)
-    let probability_final = probability + gnomad_af * (1.0 - probability);
+//     // Efficient calculation:
+//     // prob_absent_final = 1 - ((1 - prob_absent_base) × (1 - gnomad_af))
+//     // Expanded: prob_absent_base + gnomad_af × (1 - prob_absent_base)
+//     let probability_final = probability + gnomad_af * (1.0 - probability);
 
-    let valid_range = -EPSILON..=1.0 + EPSILON;
-    if !valid_range.contains(&probability_final) {
-        return Err(Error::VcfProbabilityValueInvalid {
-            field: "ADJUSTED PROBABILITY ABSENT (with gnomAD)".to_string(),
-            value: probability_final as f32,
-            chrom: get_chrom(record, header)?,
-            pos: record.pos() + 1,
-        }
-        .into());
-    }
+//     let valid_range = -EPSILON..=1.0 + EPSILON;
+//     if !valid_range.contains(&probability_final) {
+//         return Err(Error::VcfProbabilityValueInvalid {
+//             field: "ADJUSTED PROBABILITY ABSENT (with gnomAD)".to_string(),
+//             value: probability_final as f32,
+//             chrom: get_chrom(record, header)?,
+//             pos: record.pos() + 1,
+//         }
+//         .into());
+//     }
 
-    let probability = probability_final.clamp(0.0, 1.0);
+//     let probability = probability_final.clamp(0.0, 1.0);
 
-    Ok(Some(probability))
-}
+//     Ok(Some(probability))
+// }
 
 /// Combine probabilities for user-specified events into
 /// P(at least one specified event) for one ALT allele.
@@ -368,78 +370,78 @@ pub(crate) fn get_sample_af(
     Ok(Some(af as f64))
 }
 
-/// Extract per-sample allele frequencies for a specific ALT allele.
-///
-/// Reads FORMAT:AF field and returns AF values for each sample
-/// in the samples_index_map.
-///
-/// # Arguments
-/// * `record` - VCF record
-/// * `header` - VCF header
-/// * `samples_index_map` - Map of sample names to VCF indices
-/// * `alt_idx` - Index into ALT alleles (0 = first ALT)
-///
-/// # Returns
-/// HashMap of sample name to AF value. Empty if AF field missing.
-///
-/// # Errors
-/// Returns error if AF value is NaN or outside [0.0, 1.0].
-pub(crate) fn get_sample_afs(
-    record: &bcf::Record,
-    header: &HeaderView,
-    samples_index_map: &HashMap<String, usize>,
-    alt_idx: usize,
-) -> Result<HashMap<String, f64>> {
-    let mut sample_afs = HashMap::new();
+// /// Extract per-sample allele frequencies for a specific ALT allele.
+// ///
+// /// Reads FORMAT:AF field and returns AF values for each sample
+// /// in the samples_index_map.
+// ///
+// /// # Arguments
+// /// * `record` - VCF record
+// /// * `header` - VCF header
+// /// * `samples_index_map` - Map of sample names to VCF indices
+// /// * `alt_idx` - Index into ALT alleles (0 = first ALT)
+// ///
+// /// # Returns
+// /// HashMap of sample name to AF value. Empty if AF field missing.
+// ///
+// /// # Errors
+// /// Returns error if AF value is NaN or outside [0.0, 1.0].
+// pub(crate) fn get_sample_afs(
+//     record: &bcf::Record,
+//     header: &HeaderView,
+//     samples_index_map: &HashMap<String, usize>,
+//     alt_idx: usize,
+// ) -> Result<HashMap<String, f64>> {
+//     let mut sample_afs = HashMap::new();
 
-    let afs = match record.format(b"AF").float() {
-        Ok(a) => a,
-        Err(_) => {
-            warn!(
-                "AF field missing at {}:{} - variant will have no AF data",
-                get_chrom(record, header)?,
-                record.pos() + 1
-            );
-            return Ok(sample_afs);
-        }
-    };
+//     let afs = match record.format(b"AF").float() {
+//         Ok(a) => a,
+//         Err(_) => {
+//             warn!(
+//                 "AF field missing at {}:{} - variant will have no AF data",
+//                 get_chrom(record, header)?,
+//                 record.pos() + 1
+//             );
+//             return Ok(sample_afs);
+//         }
+//     };
 
-    for (sample_name, &vcf_header_idx) in samples_index_map {
-        let Some(sample_af_values) = afs.get(vcf_header_idx) else {
-            continue;
-        };
+//     for (sample_name, &vcf_header_idx) in samples_index_map {
+//         let Some(sample_af_values) = afs.get(vcf_header_idx) else {
+//             continue;
+//         };
 
-        let Some(&af) = sample_af_values.get(alt_idx) else {
-            continue;
-        };
+//         let Some(&af) = sample_af_values.get(alt_idx) else {
+//             continue;
+//         };
 
-        if af.is_missing() {
-            continue;
-        }
+//         if af.is_missing() {
+//             continue;
+//         }
 
-        if af.is_nan() || !(0.0..=1.0).contains(&af) {
-            return Err(Error::VcfAlleleFrequencyInvalid {
-                sample: sample_name.clone(),
-                af,
-                chrom: get_chrom(record, header)?,
-                pos: record.pos() + 1,
-            }
-            .into());
-        }
+//         if af.is_nan() || !(0.0..=1.0).contains(&af) {
+//             return Err(Error::VcfAlleleFrequencyInvalid {
+//                 sample: sample_name.clone(),
+//                 af,
+//                 chrom: get_chrom(record, header)?,
+//                 pos: record.pos() + 1,
+//             }
+//             .into());
+//         }
 
-        sample_afs.insert(sample_name.clone(), af as f64);
-    }
+//         sample_afs.insert(sample_name.clone(), af as f64);
+//     }
 
-    if sample_afs.is_empty() {
-        debug!(
-            "No valid AF values for any sample at {}:{} - variant will be skipped in analysis",
-            get_chrom(record, header)?,
-            record.pos() + 1
-        );
-    }
+//     if sample_afs.is_empty() {
+//         debug!(
+//             "No valid AF values for any sample at {}:{} - variant will be skipped in analysis",
+//             get_chrom(record, header)?,
+//             record.pos() + 1
+//         );
+//     }
 
-    Ok(sample_afs)
-}
+//     Ok(sample_afs)
+// }
 
 /* ================================================ */
 
@@ -674,8 +676,7 @@ pub(crate) fn copy_info_fields(
             continue;
         }
 
-        if let Ok(Some(buffer)) = source.info(field_bytes).string() {
-            let values: Vec<&[u8]> = buffer.iter().map(|s| *s).collect();
+        if let Ok(Some(values)) = source.info(field_bytes).string() {
             dest.push_info_string(field_bytes, &values)?;
             continue;
         }
@@ -1346,58 +1347,58 @@ pub(crate) mod tests {
         assert_eq!(svlen, 1); // A -> AT is an insertion, svlen = 1
     }
 
-    #[test]
-    fn test_get_prob_absent() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            prob_absent: Some(vec![0.01]),
-            prob_artifact: Some(vec![0.005]),
-            num_samples: 1,
-            ..Default::default()
-        });
+    // #[test]
+    // fn test_get_prob_absent() {
+    //     let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+    //         prob_absent: Some(vec![0.01]),
+    //         prob_artifact: Some(vec![0.005]),
+    //         num_samples: 1,
+    //         ..Default::default()
+    //     });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+    //     let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+    //     let header = reader.header().clone();
+    //     let record = reader.records().next().unwrap().unwrap();
 
-        let prob = get_prob_absent(&record, &header, 0, false)
-            .unwrap()
-            .unwrap();
-        assert!((prob - 0.015).abs() < TEST_EPSILON);
-    }
+    //     let prob = get_prob_absent(&record, &header, 0, false)
+    //         .unwrap()
+    //         .unwrap();
+    //     assert!((prob - 0.015).abs() < TEST_EPSILON);
+    // }
 
-    #[test]
-    fn test_get_prob_absent_phred() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            use_phred: true,
-            num_samples: 1,
-            ..Default::default()
-        });
+    // #[test]
+    // fn test_get_prob_absent_phred() {
+    //     let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+    //         use_phred: true,
+    //         num_samples: 1,
+    //         ..Default::default()
+    //     });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+    //     let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+    //     let header = reader.header().clone();
+    //     let record = reader.records().next().unwrap().unwrap();
 
-        let prob = get_prob_absent(&record, &header, 0, true).unwrap().unwrap();
-        // PHRED 20 ≈ 0.01, PHRED 10 ≈ 0.1, sum ≈ 0.11
-        assert!((prob - 0.11).abs() < TEST_EPSILON);
-    }
+    //     let prob = get_prob_absent(&record, &header, 0, true).unwrap().unwrap();
+    //     // PHRED 20 ≈ 0.01, PHRED 10 ≈ 0.1, sum ≈ 0.11
+    //     assert!((prob - 0.11).abs() < TEST_EPSILON);
+    // }
 
-    #[test]
-    fn test_get_prob_absent_invalid_sum() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            prob_absent: Some(vec![0.7]),
-            prob_artifact: Some(vec![0.6]), // Sum > 1.0
-            num_samples: 1,
-            ..Default::default()
-        });
+    // #[test]
+    // fn test_get_prob_absent_invalid_sum() {
+    //     let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+    //         prob_absent: Some(vec![0.7]),
+    //         prob_artifact: Some(vec![0.6]), // Sum > 1.0
+    //         num_samples: 1,
+    //         ..Default::default()
+    //     });
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+    //     let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+    //     let header = reader.header().clone();
+    //     let record = reader.records().next().unwrap().unwrap();
 
-        let result = get_prob_absent(&record, &header, 0, false);
-        assert!(result.is_err());
-    }
+    //     let result = get_prob_absent(&record, &header, 0, false);
+    //     assert!(result.is_err());
+    // }
 
     #[test]
     fn test_get_events_probability_single_event() {
@@ -1574,65 +1575,65 @@ pub(crate) mod tests {
         assert!(get_sample_af(&record, &header, 5, 0).unwrap().is_none());
     }
 
-    #[test]
-    fn test_get_sample_afs() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            af_values: Some(vec![0.45, 0.98]),
-            ..Default::default()
-        });
+    // #[test]
+    // fn test_get_sample_afs() {
+    //     let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+    //         af_values: Some(vec![0.45, 0.98]),
+    //         ..Default::default()
+    //     });
 
-        let mut samples_index_map = HashMap::new();
-        samples_index_map.insert("sample1".to_string(), 0);
-        samples_index_map.insert("sample2".to_string(), 1);
+    //     let mut samples_index_map = HashMap::new();
+    //     samples_index_map.insert("sample1".to_string(), 0);
+    //     samples_index_map.insert("sample2".to_string(), 1);
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+    //     let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+    //     let header = reader.header().clone();
+    //     let record = reader.records().next().unwrap().unwrap();
 
-        let sample_afs = get_sample_afs(&record, &header, &samples_index_map, 0).unwrap();
+    //     let sample_afs = get_sample_afs(&record, &header, &samples_index_map, 0).unwrap();
 
-        assert_eq!(sample_afs.len(), 2);
-        assert!((sample_afs["sample1"] - 0.45).abs() < TEST_EPSILON);
-        assert!((sample_afs["sample2"] - 0.98).abs() < TEST_EPSILON);
-    }
+    //     assert_eq!(sample_afs.len(), 2);
+    //     assert!((sample_afs["sample1"] - 0.45).abs() < TEST_EPSILON);
+    //     assert!((sample_afs["sample2"] - 0.98).abs() < TEST_EPSILON);
+    // }
 
-    #[test]
-    fn test_get_sample_afs_invalid() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            af_values: Some(vec![1.5]), // Invalid: > 1.0
-            num_samples: 1,
-            ..Default::default()
-        });
+    // #[test]
+    // fn test_get_sample_afs_invalid() {
+    //     let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+    //         af_values: Some(vec![1.5]), // Invalid: > 1.0
+    //         num_samples: 1,
+    //         ..Default::default()
+    //     });
 
-        let mut samples_index_map = HashMap::new();
-        samples_index_map.insert("sample1".to_string(), 0);
+    //     let mut samples_index_map = HashMap::new();
+    //     samples_index_map.insert("sample1".to_string(), 0);
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+    //     let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+    //     let header = reader.header().clone();
+    //     let record = reader.records().next().unwrap().unwrap();
 
-        let result = get_sample_afs(&record, &header, &samples_index_map, 0);
-        assert!(result.is_err());
-    }
+    //     let result = get_sample_afs(&record, &header, &samples_index_map, 0);
+    //     assert!(result.is_err());
+    // }
 
-    #[test]
-    fn test_get_sample_afs_missing() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            af_values: Some(vec![f32::missing()]),
-            num_samples: 1,
-            ..Default::default()
-        });
+    // #[test]
+    // fn test_get_sample_afs_missing() {
+    //     let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+    //         af_values: Some(vec![f32::missing()]),
+    //         num_samples: 1,
+    //         ..Default::default()
+    //     });
 
-        let mut samples_index_map = HashMap::new();
-        samples_index_map.insert("sample1".to_string(), 0);
+    //     let mut samples_index_map = HashMap::new();
+    //     samples_index_map.insert("sample1".to_string(), 0);
 
-        let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let header = reader.header().clone();
-        let record = reader.records().next().unwrap().unwrap();
+    //     let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+    //     let header = reader.header().clone();
+    //     let record = reader.records().next().unwrap().unwrap();
 
-        let sample_afs = get_sample_afs(&record, &header, &samples_index_map, 0).unwrap();
-        assert!(sample_afs.is_empty());
-    }
+    //     let sample_afs = get_sample_afs(&record, &header, &samples_index_map, 0).unwrap();
+    //     assert!(sample_afs.is_empty());
+    // }
 
     /* ====== BCF Specification check tests ===== ==== */
 
