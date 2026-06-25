@@ -260,6 +260,8 @@ pub(super) fn extract_regions(
         }
     }
 
+    regions.sort_by(|a, b| a.chrom.cmp(&b.chrom).then(a.start.cmp(&b.start)));
+
     Ok((regions, stats))
 }
 
