@@ -5,10 +5,16 @@
 //! Computes MSI probability distributions across allele frequency thresholds.
 //!
 //! # Overview
-//! 1. Core Dp Algorithm
-//! 2. Filtering Variants Per Region by Sample and AF
-//! 3. Calculating MSI Metrics
-//! 4. Af Evolution Function: Generates results for all samples and AF thresholds based on user input.
+//! 1. Core DP Algorithm (`run_msi_dp`)
+//! 2. Thread Pool Setup (`setup_thread_pool`)
+//! 3. AF Filtering (`filter_regions_by_af`)
+//! 4. DP Primitives (`run_dp_for_regions`, `find_map_estimate`)
+//! 5. MSI Metrics (`calculate_msi_metrics`)
+//! 6. Window Utilities (`get_window_slice`)
+//! 7. Windowed Analysis (`run_windowed_analysis`)
+//! 8. Global Analysis (`run_global_analysis`)
+//! 9. Orchestrator (`run_af_evolution_analysis`)
+//!
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -337,7 +343,7 @@ fn filter_regions_by_af<'a>(
 
 /* ================================================ */
 
-/* ============= MSI Metrics ====================== */
+/* ============ DP Primitives ===================== */
 
 /// Compute DP probability distribution from pre-filtered regions.
 ///
@@ -399,6 +405,10 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
 
     (k_map, msi_score, posterior_probability)
 }
+
+/* ================================================ */
+
+/* ============ MSI Metrics ======================= */
 
 /// Calculate MSI metrics for filtered regions
 ///
@@ -537,7 +547,7 @@ fn calculate_msi_metrics(
 
 /* ================================================ */
 
-/* ============= AF ANALYSIS UTILITIES ============ */
+/* ============ Window Utilities ================== */
 
 /// Get a zero-copy sub-slice of regions falling within a genomic window.
 ///
@@ -585,7 +595,9 @@ fn get_window_slice<'a>(
     &regions[start_idx..end_idx]
 }
 
-/* ============ Windowed Analysis ================= */
+/* ================================================ */
+
+/* ============ Windowed & Global Analysis ======== */
 
 /// Compute windowed MSI scores across the genome.
 ///
@@ -641,6 +653,12 @@ fn run_windowed_analysis(
         })
         .collect();
 
+    info!(
+        "Running windowed analysis: {} windows across {} chromosomes",
+        work_items.len(),
+        chroms.len()
+    );
+
     let results = Mutex::new(Vec::new());
 
     work_items.par_iter().for_each(|&(chrom, window_start)| {
@@ -678,58 +696,44 @@ fn run_windowed_analysis(
             .then(a.window_start.cmp(&b.window_start))
     });
 
+    info!(
+        "Windowed analysis complete: {} non-empty windows",
+        all_results.len()
+    );
+
     all_results
 }
 
-/* == DP ANALYSIS CORE: RUN AF EVOLUTION ========== */
-
-/// Run AF evolution analysis across AF thresholds for one sample.
-///
-/// Performs parallel MSI analysis for each AF threshold,
-/// computing probability distributions and MSI scores.
+/// Run parallel MSI analysis across all AF thresholds.
+/// Responsible for generating data for pseudotime and distribution outputs.
 ///
 /// # Arguments
-/// * `regions` - Regions with variants from extraction.
-/// * `total_regions` - Total MS valid regions in BED (for MSI score denominator)
-/// * `sample`        - Sample name (for result labeling)
-/// * `msi_high_threshold` - Threshold for MSI-High classification (percentage)
-/// * `af_thresholds` - AF thresholds to analyze (typically [1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.0] or [0.0])
-/// * `output_req` - Which outputs requested (controls computation)
-/// * `num_threads` - Thread count (None = use rayon default)
+/// * `regions`            - Regions with variants from extraction
+/// * `total_regions`      - Total MS regions (denominator for MSI score)
+/// * `sample`             - Sample name
+/// * `msi_high_threshold` - Threshold for MSI-High classification (%)
+/// * `af_thresholds`      - AF thresholds to analyze in parallel
+/// * `output_req`         - Which outputs to compute
 ///
 /// # Returns
-/// HashMap keyed by AF threshold string (e.g. "0.00", "0.50") -> MSI result.
-pub(super) fn run_af_evolution_analysis(
+/// HashMap keyed by AF threshold string (e.g. "0.00"), MSI result.
+fn run_global_analysis(
     regions: &[RegionSummary],
     total_regions: usize,
     sample: &str,
     msi_high_threshold: f64,
     af_thresholds: &[f64],
     output_req: OutputRequirements,
-    num_threads: Option<usize>,
-) -> Result<HashMap<String, AfEvolutionResult>> {
-    info!("Sample: {:?}", sample);
-    info!("AF thresholds: {:?}", af_thresholds);
-    info!("MSI-High threshold: {}%", msi_high_threshold);
-    info!("Total regions (BED): {}", total_regions);
-    info!("Regions with variants: {}", regions.len());
-    info!("Output requirements:");
-    info!("    - Uncertainty metrics: {}", output_req.needs_pseudotime);
-    info!("    - Full distribution: {}", output_req.needs_distribution);
-
-    // Step 1: Configure rayon thread pool
-    setup_thread_pool(num_threads); // once shared by both analysis functions
-
-    // Create all (AF) based work items for parallel processing
-    let work_items: Vec<f64> = af_thresholds.to_vec();
-
-    info!("Total parallel tasks: {}", work_items.len());
-
+) -> HashMap<String, AfEvolutionResult> {
     let results = Mutex::new(HashMap::new());
 
-    work_items.par_iter().for_each(|af_threshold| {
-        let filtered = filter_regions_by_af(regions, *af_threshold);
+    info!(
+        "Running global analysis: {} AF thresholds in parallel",
+        af_thresholds.len()
+    );
 
+    af_thresholds.par_iter().for_each(|af_threshold| {
+        let filtered = filter_regions_by_af(regions, *af_threshold);
         let result = calculate_msi_metrics(
             &filtered,
             total_regions,
@@ -738,16 +742,99 @@ pub(super) fn run_af_evolution_analysis(
             sample.to_string(),
             output_req,
         );
-
         results
             .lock()
             .unwrap()
             .insert(format!("{:.2}", af_threshold), result);
     });
 
-    let all_results = results.into_inner().unwrap();
+    let final_results = results.into_inner().unwrap();
+    info!("Global analysis complete: {} results", final_results.len());
 
-    Ok(all_results)
+    final_results
+}
+
+/* ================================================ */
+
+/* ============ Orchestrator ====================== */
+
+/// Run AF evolution analysis across AF thresholds for one sample.
+///
+/// Performs parallel MSI analysis for each AF threshold,
+/// computing probability distributions and MSI scores.
+///
+/// # Arguments
+/// * `regions`               - Regions with variants from extraction
+/// * `total_regions`         - Total MS regions (denominator for MSI score)
+/// * `sample`                - Sample name
+/// * `msi_high_threshold`    - Threshold for MSI-High classification (%)
+/// * `af_thresholds`         - AF thresholds to analyze
+/// * `output_req`            - Which outputs requested (controls computation)
+/// * `num_threads`           - Thread count (None = rayon default)
+/// * `window_size`           - Window width in bases for heatmap analysis
+/// * `af_threshold_windowed` - Fixed AF threshold for windowed analysis
+///
+/// # Returns
+/// Tuple of `(global_results, window_results)` where:
+/// - `global_results`: HashMap keyed by AF threshold string -> MSI result.
+///   Empty if neither pseudotime nor distribution requested.
+/// - `window_results`: `Some(Vec<WindowResult>)` if heatmap requested, else `None`
+///
+/// # Example
+/// assert_eq!(run_af_evolution_analysis(&regions, 100, "Sample1", 3.5, &[0.0, 0.1], output_req, Some(4), 1_000_000, 0.1), (global_results, Some(window_results)));
+pub(super) fn run_af_evolution_analysis(
+    regions: &[RegionSummary],
+    total_regions: usize,
+    sample: &str,
+    msi_high_threshold: f64,
+    af_thresholds: &[f64],
+    output_req: OutputRequirements,
+    num_threads: Option<usize>,
+    window_size: u64,
+    af_threshold_windowed: f64,
+) -> Result<(
+    HashMap<String, AfEvolutionResult>,
+    Option<Vec<WindowResult>>,
+)> {
+    info!("Sample: {:?}", sample);
+    info!("AF thresholds: {:?}", af_thresholds);
+    info!("MSI-High threshold: {}%", msi_high_threshold);
+    info!("Total regions (BED): {}", total_regions);
+    info!("Regions with variants: {}", regions.len());
+    info!("Output requirements:");
+    info!("    - Pseudotime: {}", output_req.needs_pseudotime);
+    info!("    - Distribution: {}", output_req.needs_distribution);
+    info!("    - Heatmap: {}", output_req.needs_heatmap);
+
+    // Step 1: Configure rayon thread pool
+    setup_thread_pool(num_threads); // once shared by both analysis functions
+
+    // Step 2: Run global analysis — skipped if only heatmap requested
+    let global_results = if output_req.needs_pseudotime || output_req.needs_distribution {
+        run_global_analysis(
+            regions,
+            total_regions,
+            sample,
+            msi_high_threshold,
+            af_thresholds,
+            output_req,
+        )
+    } else {
+        HashMap::new()
+    };
+
+    // Step 3: Run windowed analysis — only if heatmap requested
+    let window_results = if output_req.needs_heatmap {
+        Some(run_windowed_analysis(
+            regions,
+            af_threshold_windowed,
+            window_size,
+        ))
+    } else {
+        None
+    };
+
+    Ok((global_results, window_results))
 }
 
 /* ================================================ */
@@ -864,6 +951,20 @@ mod tests {
         assert!((dist[2] - 1.0).abs() < TEST_EPSILON);
     }
 
+    /* ============ Parallelization Setup ============ */
+
+    #[test]
+    fn test_setup_thread_pool_default() {
+        setup_thread_pool(None);
+        assert!(rayon::current_num_threads() >= 1);
+    }
+
+    #[test]
+    fn test_setup_thread_pool_explicit() {
+        setup_thread_pool(Some(2));
+        assert!(rayon::current_num_threads() >= 1);
+    }
+
     /* ============ FilteredRegions Tests ============ */
 
     #[test]
@@ -976,8 +1077,7 @@ mod tests {
         assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON);
     }
 
-    /* ======= MSI Metrics tests ===================== */
-    /* ======= run_dp_for_regions tests ============== */
+    /* ============ DP Primitives ==================== */
 
     #[test]
     fn test_run_dp_for_regions_empty() {
@@ -1032,8 +1132,6 @@ mod tests {
         assert!((dist[1] - 0.85).abs() < TEST_EPSILON); // P(1) = 0.85
     }
 
-    /* ======= find_map_estimate tests =============== */
-
     #[test]
     fn test_find_map_estimate_basic() {
         // P(0)=0.42, P(1)=0.46, P(2)=0.12, k_map=1
@@ -1084,7 +1182,7 @@ mod tests {
         assert!((posterior_probability - 0.7).abs() < TEST_EPSILON);
     }
 
-    /* ======= calculate_msi_metrics tests =========== */
+    /* ============ MSI Metrics ====================== */
 
     #[test]
     fn test_calculate_msi_metrics_empty() {
@@ -1177,7 +1275,7 @@ mod tests {
         assert!(result_af5.distribution.is_none());
     }
 
-    /* ==== AF Analysis Utilities ==================== */
+    /* ============ Window Utilities ================= */
 
     #[test]
     fn test_get_window_slice_basic() {
@@ -1244,17 +1342,32 @@ mod tests {
         assert_eq!(slice[0].start, 0);
     }
 
-    /* ======= run_windowed_analysis tests ============ */
+    /* ======= Windowed & Global Analysis ============ */
 
     #[test]
     fn test_run_windowed_analysis_basic() {
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100,
-                vec![make_variant(0.1, 0.8)], true),
-            make_region("chr1:200-230", "chr1", 200,
-                vec![make_variant(0.2, 0.9)], true),
-            make_region("chr2:100-130", "chr2", 100,
-                vec![make_variant(0.3, 0.7)], true),
+            make_region(
+                "chr1:100-130",
+                "chr1",
+                100,
+                vec![make_variant(0.1, 0.8)],
+                true,
+            ),
+            make_region(
+                "chr1:200-230",
+                "chr1",
+                200,
+                vec![make_variant(0.2, 0.9)],
+                true,
+            ),
+            make_region(
+                "chr2:100-130",
+                "chr2",
+                100,
+                vec![make_variant(0.3, 0.7)],
+                true,
+            ),
         ];
         let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
 
@@ -1280,10 +1393,20 @@ mod tests {
     #[test]
     fn test_run_windowed_analysis_empty_window_excluded() {
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100,
-                vec![make_variant(0.1, 0.8)], true),
-            make_region("chr1:5000100-5000130", "chr1", 5_000_100,
-                vec![make_variant(0.2, 0.9)], true),
+            make_region(
+                "chr1:100-130",
+                "chr1",
+                100,
+                vec![make_variant(0.1, 0.8)],
+                true,
+            ),
+            make_region(
+                "chr1:5000100-5000130",
+                "chr1",
+                5_000_100,
+                vec![make_variant(0.2, 0.9)],
+                true,
+            ),
         ];
         let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
 
@@ -1302,10 +1425,13 @@ mod tests {
 
     #[test]
     fn test_run_windowed_analysis_zero_window_size() {
-        let regions = vec![
-            make_region("chr1:100-130", "chr1", 100,
-                vec![make_variant(0.1, 0.8)], true),
-        ];
+        let regions = vec![make_region(
+            "chr1:100-130",
+            "chr1",
+            100,
+            vec![make_variant(0.1, 0.8)],
+            true,
+        )];
         let results = run_windowed_analysis(&regions, 0.1, 0);
         assert!(results.is_empty());
     }
@@ -1314,10 +1440,13 @@ mod tests {
     fn test_run_windowed_analysis_af_filter_applied() {
         // All variants have af=0.05, below threshold 0.1 - filtered out
         // Region exists but no variants pass, msi_score=0, posterior=1.0
-        let regions = vec![
-            make_region("chr1:100-130", "chr1", 100,
-                vec![make_variant(0.1, 0.05)], true),
-        ];
+        let regions = vec![make_region(
+            "chr1:100-130",
+            "chr1",
+            100,
+            vec![make_variant(0.1, 0.05)],
+            true,
+        )];
         let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].msi_score, 0.0);
@@ -1329,10 +1458,20 @@ mod tests {
         // 2 regions in window, both unstable, k_map=2, score=2/2×100=100%
         // Windowed uses per-window denominator
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100,
-                vec![make_variant(0.01, 0.8)], true),
-            make_region("chr1:200-230", "chr1", 200,
-                vec![make_variant(0.01, 0.9)], true),
+            make_region(
+                "chr1:100-130",
+                "chr1",
+                100,
+                vec![make_variant(0.01, 0.8)],
+                true,
+            ),
+            make_region(
+                "chr1:200-230",
+                "chr1",
+                200,
+                vec![make_variant(0.01, 0.9)],
+                true,
+            ),
         ];
         let results = run_windowed_analysis(&regions, 0.0, 1_000_000);
         assert_eq!(results.len(), 1);
@@ -1340,7 +1479,26 @@ mod tests {
         assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON);
     }
 
-    /* ==== run_af_evolution_analysis tests ========== */
+    #[test]
+    fn test_run_global_analysis_basic() {
+        let regions = vec![make_region_simple(vec![make_variant(0.1, 0.5)])];
+        let output_req = OutputRequirements {
+            needs_pseudotime: true,
+            needs_distribution: false,
+            needs_heatmap: false,
+        };
+        let results = run_global_analysis(&regions, 100, "sample1", 3.5, &[0.0], output_req);
+
+        assert_eq!(results.len(), 1);
+        let r = &results["0.00"];
+        assert_eq!(r.sample, "sample1");
+        assert_eq!(r.k_map.unwrap(), 1);
+        assert!((r.msi_score_map.unwrap() - 1.0).abs() < TEST_EPSILON);
+        assert_eq!(r.msi_status.as_deref(), Some("MSS"));
+        assert_eq!(r.regions_with_variants.unwrap(), 1);
+    }
+
+    /* ============ Orchestrator ===================== */
 
     #[test]
     fn test_run_af_evolution_analysis_basic() {
@@ -1352,17 +1510,20 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let results = run_af_evolution_analysis(
+        let (results, window_results) = run_af_evolution_analysis(
             &regions,
             100,
             "sample1",
             3.5,
-            &vec![0.0],
+            &[0.0],
             output_req,
             Some(1),
+            1_000_000,
+            0.1,
         )
         .unwrap();
 
+        assert!(window_results.is_none());
         let result = &results["0.00"];
 
         assert!(result.k_map.is_none());
@@ -1408,17 +1569,20 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let results = run_af_evolution_analysis(
+        let (results, window_results) = run_af_evolution_analysis(
             &regions,
             100,
             "sample1",
             3.5,
-            &vec![0.0, 0.5, 1.0],
+            &[0.0, 0.5, 1.0],
             output_req,
             Some(1),
+            1_000_000,
+            0.1,
         )
         .unwrap();
 
+        assert!(window_results.is_none());
         assert_eq!(results.len(), 3, "Should have 3 AF threshold results");
 
         // AF=1.0: no variants pass (0.9 < 1.0, 0.5 < 1.0)
@@ -1485,5 +1649,52 @@ mod tests {
             af_0_5.msi_score_map, af_0_0.msi_score_map,
             "MSI scores should match when same regions pass"
         );
+    }
+
+    #[test]
+    fn test_run_af_evolution_analysis_heatmap_path() {
+        let regions = vec![
+            make_region(
+                "chr1:100-130",
+                "chr1",
+                100,
+                vec![make_variant(0.1, 0.8)],
+                true,
+            ),
+            make_region(
+                "chr1:200-230",
+                "chr1",
+                200,
+                vec![make_variant(0.2, 0.9)],
+                true,
+            ),
+        ];
+        let output_req = OutputRequirements {
+            needs_pseudotime: false,
+            needs_distribution: false,
+            needs_heatmap: true,
+        };
+        let (global_results, window_results) = run_af_evolution_analysis(
+            &regions,
+            100,
+            "sample1",
+            3.5,
+            &[0.0],
+            output_req,
+            Some(1),
+            1_000_000,
+            0.1,
+        )
+        .unwrap();
+
+        assert!(global_results.is_empty());
+
+        let windows = window_results.unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].chrom, "chr1");
+        assert_eq!(windows[0].window_start, 0);
+        assert_eq!(windows[0].regions_in_window, 2);
+        assert!((windows[0].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((windows[0].posterior_probability - 0.72).abs() < TEST_EPSILON);
     }
 }
