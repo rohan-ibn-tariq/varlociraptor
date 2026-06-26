@@ -51,7 +51,7 @@ pub(crate) const MSI_DUMMY_TAG: &[u8] = b"MSI_DUMMY";
 
 /// Full VCF header declaration for REGION_ID INFO field.
 pub(crate) const MSI_REGION_ID_HEADER: &[u8] =
-    br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##;
+    br##"##INFO=<ID=REGION_ID,Number=A,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##;
 
 /// Full VCF header declaration for MSI_DUMMY INFO field.
 pub(crate) const MSI_DUMMY_HEADER: &[u8] =
