@@ -19,7 +19,7 @@
 //! (lexicographically) and position, which is a common requirement for genomic analyses.
 //!
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -296,7 +296,7 @@ pub(super) fn process_and_annotate(
                     variant_window.push_back(VariantInWindow {
                         record: next_record,
                         chrom,
-                        matching_region: None,
+                        matching_regions: HashMap::new(),
                         aux_info,
                     });
                 }
@@ -324,7 +324,7 @@ pub(super) fn process_and_annotate(
                 if should_include_variant(&variant_info.record, &header_view, alt_idx, &region)? {
                     let region_id = region.region_id();
 
-                    if let Some(existing) = &variant_info.matching_region {
+                    if let Some(existing) = variant_info.matching_regions.get(&alt_idx) {
                         return Err(Error::MsiBedRegionsOverlapping {
                             pos: variant_info.record.pos(),
                             existing_region: existing.clone(),
@@ -332,8 +332,8 @@ pub(super) fn process_and_annotate(
                         }
                         .into());
                     }
+                    variant_info.matching_regions.insert(alt_idx, region_id);
 
-                    variant_info.matching_region = Some(region_id);
                     found_perfect_indel_in_region = true;
                     break;
                 }

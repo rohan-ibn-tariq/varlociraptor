@@ -1305,7 +1305,34 @@ pub(crate) mod tests {
         (reader, header, record)
     }
 
-    /// Create a test VCF record with specified parameters.
+    /// Create a test VCF record with one or more ALT alleles.
+    ///
+    /// # Arguments
+    /// * `writer`      - BCF writer
+    /// * `rid`         - Reference ID (chromosome index in header)
+    /// * `pos`         - Position (0-based)
+    /// * `ref_allele`  - Reference allele bytes (e.g. `b"ACAG"`)
+    /// * `alt_alleles` - Slice of ALT allele byte slices (e.g. `&[b"ACAGCAG", b"A"]`)
+    ///
+    /// # Returns
+    /// Configured BCF record ready for testing.
+    pub(crate) fn create_test_record_multi_alt(
+        writer: &bcf::Writer,
+        rid: u32,
+        pos: i64,
+        ref_allele: &[u8],
+        alt_alleles: &[&[u8]],
+    ) -> bcf::Record {
+        let mut record = writer.empty_record();
+        record.set_rid(Some(rid));
+        record.set_pos(pos);
+        let mut alleles: Vec<&[u8]> = vec![ref_allele];
+        alleles.extend_from_slice(alt_alleles);
+        record.set_alleles(&alleles).unwrap();
+        record
+    }
+
+    /// Create a test VCF record with a single ALT allele.
     ///
     /// # Arguments
     /// * `writer` - VCF writer
@@ -1323,11 +1350,7 @@ pub(crate) mod tests {
         ref_allele: &[u8],
         alt_allele: &[u8],
     ) -> bcf::Record {
-        let mut record = writer.empty_record();
-        record.set_rid(Some(rid));
-        record.set_pos(pos);
-        record.set_alleles(&[ref_allele, alt_allele]).unwrap();
-        record
+        create_test_record_multi_alt(writer, rid, pos, ref_allele, &[alt_allele])
     }
 
     /* ==== BCF Extraction Function(s) tests ========= */

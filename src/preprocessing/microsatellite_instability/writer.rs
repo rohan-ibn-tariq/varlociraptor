@@ -11,6 +11,7 @@
 
 use anyhow::Result;
 use rust_htslib::bcf::{self, Writer};
+use std::collections::HashMap;
 
 use crate::constants::{
     MSI_DUMMY_HEADER, MSI_DUMMY_TAG, MSI_REGION_ID_HEADER, MSI_REGION_ID_TAG,
@@ -29,8 +30,19 @@ pub(super) struct VariantInWindow {
     pub record: bcf::Record,
     /// Chromosome name
     pub chrom: String,
-    /// Region ID for MS indels (None if not MS indel)
-    pub matching_region: Option<String>,
+    /// Region IDs matched per ALT allele (Number=A).
+    ///
+    /// Key: ALT index (0-based into the ALT array).
+    /// Value: BED region identifier matched by this ALT (e.g. "chr1:1000-1030").
+    ///
+    /// Only ALTs that overlap a BED region have an entry.
+    /// ALTs with no BED match are absent.
+    /// A single record can have multiple entries if different ALTs
+    /// overlap different non-overlapping BED regions.
+    ///
+    /// Invariant: each ALT index maps to at most one region.
+    /// Assigning a second region to the same ALT is an error.
+    pub matching_regions: HashMap<usize, String>,
     /// User-specified INFO fields collected from input record.
     /// Written to output via aux_info.write() during write_variant.
     /// Fields in PREPROCESS_MSI_OMIT_AUX are excluded to prevent
@@ -137,8 +149,19 @@ pub(super) fn write_variant(
         .aux_info
         .write(&mut output_record, &PREPROCESS_MSI_OMIT_AUX)?;
 
-    if let Some(region_id) = &variant_info.matching_region {
-        output_record.push_info_string(MSI_REGION_ID_TAG, &[region_id.as_bytes()])?;
+    let n_alts = output_record.allele_count() as usize - 1;
+    let region_id_bytes: Vec<&[u8]> = (0..n_alts)
+        .map(|i| {
+            variant_info
+                .matching_regions
+                .get(&i)
+                .map(|s| s.as_bytes())
+                .unwrap_or(b".")
+        })
+        .collect();
+
+    if region_id_bytes.iter().any(|r| *r != b".") {
+        output_record.push_info_string(MSI_REGION_ID_TAG, &region_id_bytes)?;
         *counter += 1;
     }
 
@@ -156,9 +179,10 @@ mod tests {
     use rust_htslib::bcf::{self, Read};
     use tempfile::NamedTempFile;
 
+    use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
     use crate::utils::aux_info::tests::make_aux_collector;
     use crate::utils::bcf_utils::tests::{
-        create_test_record, create_test_vcf, read_first_record_simple, TestVcfConfig,
+        create_test_record, create_test_record_multi_alt, create_test_vcf, read_first_record_simple, TestVcfConfig,
     };
 
     /* ============ VCF Helpers  ======================= */
@@ -168,12 +192,8 @@ mod tests {
         let mut header = bcf::Header::new();
         header.push_record(br"##fileformat=VCFv4.2");
         header.push_record(br"##contig=<ID=chr1,length=1000000>");
-        header.push_record(
-            br##"##INFO=<ID=REGION_ID,Number=1,Type=String,Description="BED region ID">"##,
-        );
-        header.push_record(
-            br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##
-        );
+        header.push_record(MSI_REGION_ID_HEADER);
+        header.push_record(MSI_DUMMY_HEADER);
         header
     }
 
@@ -306,10 +326,13 @@ mod tests {
 
         let record = create_test_record(&writer, 0, 1000, b"ACAG", b"ACAGCAG");
 
+        let mut matching_regions = HashMap::new();
+        matching_regions.insert(0, "chr1:1000-1020".to_string());
+
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_region: Some("chr1:1000-1020".to_string()),
+            matching_regions,
             aux_info: AuxInfo::default(),
         };
 
@@ -337,7 +360,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_region: None,
+            matching_regions: HashMap::new(),
             aux_info: AuxInfo::default(),
         };
 
@@ -369,7 +392,11 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_region: Some("chr1:5000-5020".to_string()),
+            matching_regions: {
+                let mut m = HashMap::new();
+                m.insert(0, "chr1:5000-5020".to_string());
+                m
+            },
             aux_info: AuxInfo::default(),
         };
 
@@ -403,7 +430,7 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_region: None,
+            matching_regions: HashMap::new(),
             aux_info: AuxInfo::default(),
         };
 
@@ -433,7 +460,11 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_region: Some("chr1:1000-1020".to_string()),
+            matching_regions: {
+                let mut m = HashMap::new();
+                m.insert(0, "chr1:1000-1020".to_string());
+                m
+            },
             aux_info: AuxInfo::default(),
         };
 
@@ -475,7 +506,11 @@ mod tests {
         let variant_info = VariantInWindow {
             record,
             chrom: "chr1".to_string(),
-            matching_region: Some("chr1:1000-1020".to_string()),
+            matching_regions: {
+                let mut m = HashMap::new();
+                m.insert(0, "chr1:1000-1020".to_string());
+                m
+            },
             aux_info,
         };
 
@@ -487,5 +522,41 @@ mod tests {
         let cosmic = record.info(b"COSMIC_ID").string().unwrap();
         assert!(cosmic.is_some(), "COSMIC_ID propagated via aux_info");
         assert_eq!(cosmic.unwrap()[0], b"COSM123");
+    }
+
+    #[test]
+    fn test_write_variant_two_alts_different_regions() {
+        let tmp = NamedTempFile::new().unwrap();
+        let header = create_minimal_vcf_header();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        // Two ALTs: ALT0=ACAGCAG (overlaps Region1), ALT1=A (overlaps Region2)
+        let record = create_test_record_multi_alt(
+            &writer, 0, 997, b"ACAG", &[b"ACAGCAG", b"A"]
+        );
+
+        let mut matching_regions = HashMap::new();
+        matching_regions.insert(0, "chr1:1001-1030".to_string()); // ALT0
+        matching_regions.insert(1, "chr1:994-1001".to_string());  // ALT1
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr1".to_string(),
+            matching_regions,
+            aux_info: AuxInfo::default(),
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        assert_eq!(counter, 1);
+
+        let (_reader, record) = read_first_record_simple(tmp.path());
+        let region_ids = record.info(b"REGION_ID").string().unwrap().unwrap();
+
+        assert_eq!(region_ids.len(), 2);
+        assert_eq!(region_ids[0], b"chr1:1001-1030");
+        assert_eq!(region_ids[1], b"chr1:994-1001");
     }
 }
