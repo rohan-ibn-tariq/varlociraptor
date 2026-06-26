@@ -45,7 +45,8 @@ pub(super) struct PreprocessingStats {
     pub total_regions: usize,
     /// Number of valid BED regions with motif length 1-6 bp.
     pub valid_regions: usize,
-    /// Number of indels that were annotated with MS region information.
+    /// VCF records annotated with REGION_ID (counted per record,
+    /// not per ALT allele - a multi-ALT record counts as one).
     pub annotated_indels: usize,
     /// Number of dummy indels injected for MS regions without variants.
     pub dummy_indels: usize,
