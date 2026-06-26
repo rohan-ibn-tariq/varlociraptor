@@ -7,7 +7,7 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use rust_htslib::bcf::{self, header::HeaderView, Read};
 
-use crate::constants::{MSI_REGION_ID_TAG, MSI_DUMMY_TAG}
+use crate::constants::{MSI_REGION_ID_TAG, MSI_DUMMY_TAG};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
     get_chrom, get_events_probability, get_info_strings, get_sample_af, record_has_info_flag,
@@ -86,19 +86,21 @@ impl RegionSummary {
 /// Statistics collected during extraction.
 #[derive(Debug, Default)]
 pub(super) struct ExtractionStats {
-    /// Total VCF records read (MS and non-MS).
+    /// Total VCF records read (MS and non-MS: one per line, regardless of ALT count).
     pub total_records: usize,
     /// Records skipped — no REGION_ID, not MS-relevant.
     /// Includes SNVs and non-perfect indels that passed through preprocessing unchanged.
+    /// Note: Counted per record, not per allele.
     pub skipped_non_ms: usize,
     /// Unique MS regions encountered — used as the MSI score denominator.
     pub total_ms_regions: usize,
-    /// Dummy indel records processed (MSI_DUMMY flag set).
+    /// Dummy indel records processed (MSI_DUMMY flag set), counted per record.
     /// Each corresponds to a region where no perfect indel was observed in reads.
+    /// Note: Each dummy has one ALT by construction.
     pub dummy_records: usize,
-    /// Alleles skipped — FORMAT:AF absent or missing for this sample.
+    /// ALT Alleles skipped — FORMAT:AF absent for the sample.
     pub skipped_missing_af: usize,
-    /// Alleles skipped — event probability field absent or missing.
+    /// ALT Alleles skipped — event probability field absent.
     pub skipped_missing_prob: usize,
 }
 
@@ -108,19 +110,13 @@ impl ExtractionStats {
         let with_real = regions.iter().filter(|r| r.has_real_indel).count();
 
         info!("Extraction statistics:");
-        info!("  Total records read:          {}", self.total_records);
-        info!("  Non-MS records skipped:      {}", self.skipped_non_ms);
-        info!("  Total MS regions:            {}", self.total_ms_regions);
-        info!("  Regions with real indel:     {}", with_real);
-        info!("  Regions with dummy indels:   {}", self.dummy_records);
-        info!(
-            "  Alleles skipped (missing AF):   {}",
-            self.skipped_missing_af
-        );
-        info!(
-            "  Alleles skipped (missing prob): {}",
-            self.skipped_missing_prob
-        );
+        info!("  - Total records read:             {}", self.total_records);
+        info!("  - Non-MS records skipped:         {}", self.skipped_non_ms);
+        info!("  - Total MS regions:               {}", self.total_ms_regions);
+        info!("  - Regions with real indel:        {}", with_real);
+        info!("  - Regions with dummy indels:      {}", self.dummy_records);
+        info!("  - ALT alleles skipped (no AF):    {}", self.skipped_missing_af);
+        info!("  - ALT alleles skipped (no prob):  {}", self.skipped_missing_prob);
     }
 }
 
