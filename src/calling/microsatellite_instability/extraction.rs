@@ -7,6 +7,7 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use rust_htslib::bcf::{self, header::HeaderView, Read};
 
+use crate::constants::{MSI_REGION_ID_TAG, MSI_DUMMY_TAG}
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
     get_chrom, get_events_probability, get_info_strings, get_sample_af, record_has_info_flag,
@@ -170,18 +171,21 @@ pub(super) fn extract_regions(
             Some(Ok(())) => {}
         }
 
-        if !record_has_info_string(&record, b"REGION_ID") {
+        // Preprocessing guarantees REGION_ID is only written when at least one
+        // ALT matched a BED region - all-dot records are never written.
+        // So presence of the field means at least one non-dot value exists.
+        if !record_has_info_string(&record, MSI_REGION_ID_TAG) {
             stats.skipped_non_ms += 1;
             continue;
         }
 
-        let is_dummy = record_has_info_flag(&record, b"MSI_DUMMY");
+        let is_dummy = record_has_info_flag(&record, MSI_DUMMY_TAG);
         if is_dummy {
             stats.dummy_records += 1;
         }
 
         let region_id =
-            match get_info_strings(&record, b"REGION_ID").and_then(|v| v.into_iter().next()) {
+            match get_info_strings(&record, MSI_REGION_ID_TAG).and_then(|v| v.into_iter().next()) {
                 Some(id) => id,
                 None => {
                     warn!(
