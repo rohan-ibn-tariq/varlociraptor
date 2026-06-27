@@ -182,7 +182,8 @@ mod tests {
     use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
     use crate::utils::aux_info::tests::make_aux_collector;
     use crate::utils::bcf_utils::tests::{
-        create_test_record, create_test_record_multi_alt, create_test_vcf, read_first_record_simple, TestVcfConfig,
+        create_test_record, create_test_record_multi_alt, create_test_vcf,
+        read_first_record_simple, TestVcfConfig,
     };
 
     /* ============ VCF Helpers  ======================= */
@@ -531,13 +532,11 @@ mod tests {
         let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
 
         // Two ALTs: ALT0=ACAGCAG (overlaps Region1), ALT1=A (overlaps Region2)
-        let record = create_test_record_multi_alt(
-            &writer, 0, 997, b"ACAG", &[b"ACAGCAG", b"A"]
-        );
+        let record = create_test_record_multi_alt(&writer, 0, 997, b"ACAG", &[b"ACAGCAG", b"A"]);
 
         let mut matching_regions = HashMap::new();
         matching_regions.insert(0, "chr1:1001-1030".to_string()); // ALT0
-        matching_regions.insert(1, "chr1:994-1001".to_string());  // ALT1
+        matching_regions.insert(1, "chr1:994-1001".to_string()); // ALT1
 
         let variant_info = VariantInWindow {
             record,
