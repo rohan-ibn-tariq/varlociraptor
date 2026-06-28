@@ -1,5 +1,29 @@
 //! extraction.rs
 //!
+//! VCF streaming and variant extraction for MSI calling.
+//!
+//! # This module provides:
+//!     1. Data Structures (`Variant`, `RegionSummary`, `ExtractionStats`)
+//!     2. Main Extraction (`extract_regions`)
+//!
+//! # Input Contract
+//! Input VCF must be the output of `varlociraptor preprocess msi` followed by
+//! `varlociraptor call variants`. This guarantees:
+//! - Records with `INFO/REGION_ID` are MS indels (real or dummy)
+//! - `INFO/MSI_DUMMY` marks dummy records (no real indel observed in the region)
+//! - `INFO/REGION_ID` is `Number=A` - one value per ALT allele
+//! - `INFO/PROB_{EVENT}` fields are expected for all user-specified events
+//!   (missing values are skipped and counted in `ExtractionStats`)
+//! - `FORMAT/AF` is expected for the sample of interest
+//!   (missing values are skipped and counted in `ExtractionStats`)
+//!
+//! # Design
+//! Records without `INFO/REGION_ID` are skipped - non-MS variants that
+//! passed through preprocessing unchanged. Per-ALT REGION_ID values of
+//! `"."` indicate unmatched ALTs in multi-allelic records and are skipped.
+//! Regions are grouped via `HashMap` for O(1) lookup and sorted by
+//! `(chrom, start)` before return.
+//!
 
 use std::collections::HashMap;
 
@@ -7,7 +31,7 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use rust_htslib::bcf::{self, header::HeaderView, Read};
 
-use crate::constants::{MSI_REGION_ID_TAG, MSI_DUMMY_TAG};
+use crate::constants::{MSI_DUMMY_TAG, MSI_REGION_ID_TAG};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
     get_chrom, get_events_probability, get_info_strings, get_sample_af, record_has_info_flag,
@@ -19,7 +43,7 @@ use crate::utils::bcf_utils::{
 /// A single variant contributing to MSI analysis for one region.
 ///
 /// Note: In multi-allelic records each ALT allele yields a separate Variant.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct Variant {
     /// P(variant absent) = 1.0 - P(at least one specified event).
     pub prob_absent: f64,
@@ -51,6 +75,12 @@ impl RegionSummary {
     /// Parse a REGION_ID string ("chrom:start-end") into a RegionSummary.
     ///
     /// Returns Err if the format is invalid so the caller can warn and skip.
+    ///
+    /// # Errors
+    /// Returns `Error::MsiRegionIdMalformed` if:
+    /// - No `:` separator between chrom and coordinates
+    /// - No `-` separator between start and end
+    /// - Start coordinate is not a valid integer
     fn from_region_id(region_id: &str) -> Result<Self> {
         let (chrom, coords) =
             region_id
@@ -106,17 +136,33 @@ pub(super) struct ExtractionStats {
 
 impl ExtractionStats {
     /// Log extraction statistics alongside region-level counts.
+    ///
+    /// # Arguments
+    /// * `regions` - Extracted regions used to compute `has_real_indel` count.
+    ///   Passed separately since the count is derived post-extraction.
     pub fn log_stats(&self, regions: &[RegionSummary]) {
         let with_real = regions.iter().filter(|r| r.has_real_indel).count();
 
         info!("Extraction statistics:");
         info!("  - Total records read:             {}", self.total_records);
-        info!("  - Non-MS records skipped:         {}", self.skipped_non_ms);
-        info!("  - Total MS regions:               {}", self.total_ms_regions);
+        info!(
+            "  - Non-MS records skipped:         {}",
+            self.skipped_non_ms
+        );
+        info!(
+            "  - Total MS regions:               {}",
+            self.total_ms_regions
+        );
         info!("  - Regions with real indel:        {}", with_real);
         info!("  - Regions with dummy indels:      {}", self.dummy_records);
-        info!("  - ALT alleles skipped (no AF):    {}", self.skipped_missing_af);
-        info!("  - ALT alleles skipped (no prob):  {}", self.skipped_missing_prob);
+        info!(
+            "  - ALT alleles skipped (no AF):    {}",
+            self.skipped_missing_af
+        );
+        info!(
+            "  - ALT alleles skipped (no prob):  {}",
+            self.skipped_missing_prob
+        );
     }
 }
 
@@ -164,7 +210,9 @@ pub(super) fn extract_regions(
                 }
                 .into())
             }
-            Some(Ok(())) => {}
+            Some(Ok(())) => {
+                stats.total_records += 1;
+            }
         }
 
         // Preprocessing guarantees REGION_ID is only written when at least one
@@ -180,12 +228,18 @@ pub(super) fn extract_regions(
             stats.dummy_records += 1;
         }
 
-        let region_id =
-            match get_info_strings(&record, MSI_REGION_ID_TAG).and_then(|v| v.into_iter().next()) {
+        // Extract one Variant per ALT allele.
+        let allele_count = record.allele_count() as usize;
+        for alt_idx in 0..allele_count.saturating_sub(1) {
+            let region_id = match get_info_strings(&record, MSI_REGION_ID_TAG)
+                .and_then(|v| v.into_iter().nth(alt_idx))
+                .filter(|s| s != ".")
+            {
                 Some(id) => id,
                 None => {
-                    warn!(
-                        "REGION_ID missing or empty at {}:{} — skipping",
+                    debug!(
+                        "ALT {} at {}:{} has no region - skipping",
+                        alt_idx,
                         get_chrom(&record, &header).unwrap_or_default(),
                         record.pos() + 1
                     );
@@ -193,33 +247,31 @@ pub(super) fn extract_regions(
                 }
             };
 
-        let region_idx = match region_index.get(&region_id) {
-            Some(&idx) => idx,
-            None => match RegionSummary::from_region_id(&region_id) {
-                Ok(summary) => {
-                    let idx = regions.len();
-                    regions.push(summary);
-                    region_index.insert(region_id, idx);
-                    stats.total_ms_regions += 1;
-                    idx
-                }
-                Err(e) => {
-                    warn!("Skipping record with malformed REGION_ID: {}", e);
-                    continue;
-                }
-            },
-        };
+            // Register region on first encounter, look up existing index otherwise.
+            let region_idx = match region_index.get(&region_id) {
+                Some(&idx) => idx,
+                None => match RegionSummary::from_region_id(&region_id) {
+                    Ok(summary) => {
+                        let idx = regions.len();
+                        regions.push(summary);
+                        region_index.insert(region_id, idx);
+                        stats.total_ms_regions += 1;
+                        idx
+                    }
+                    Err(e) => {
+                        warn!("Skipping record with malformed REGION_ID: {}", e);
+                        continue;
+                    }
+                },
+            };
 
-        // Mark region as having a real (non-dummy) indel if applicable.
-        // This is set regardless of whether prob/AF extraction succeeds -
-        // the indel structurally existed in the reads.
-        if !is_dummy {
-            regions[region_idx].has_real_indel = true;
-        }
+            // Mark region as having a real (non-dummy) indel for this alt if applicable.
+            // This is set regardless of whether prob/AF extraction succeeds -
+            // the indel structurally existed in the reads.
+            if !is_dummy {
+                regions[region_idx].has_real_indel = true;
+            }
 
-        // Extract one Variant per ALT allele.
-        let allele_count = record.allele_count() as usize;
-        for alt_idx in 0..allele_count.saturating_sub(1) {
             // Combine event probabilities, P(at least one event)
             let prob_events =
                 match get_events_probability(&record, &header, alt_idx, events, is_phred)? {
@@ -268,10 +320,53 @@ pub(super) fn extract_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_htslib::bcf;
+    use rust_htslib::bcf::{self, record::Numeric};
     use tempfile::NamedTempFile;
 
-    use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_LOOSE};
+    use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
+    use crate::utils::stats::test_constants::TEST_EPSILON_LOOSE;
+
+    /* ====== Shared header builder =============== */
+
+    /// Build a minimal BCF header for extraction tests.
+    /// Includes REGION_ID (Number=A), MSI_DUMMY, PROB_SOMATIC, FORMAT:AF,
+    /// and a single sample "tumor" on contigs chr1 and chr2.
+    fn make_header() -> bcf::Header {
+        let mut header = bcf::Header::new();
+        header.push_record(br#"##fileformat=VCFv4.2"#);
+        header.push_record(br#"##contig=<ID=chr1,length=10000000>"#);
+        header.push_record(br#"##contig=<ID=chr2,length=10000000>"#);
+        header.push_record(MSI_REGION_ID_HEADER);
+        header.push_record(MSI_DUMMY_HEADER);
+        header.push_record(
+            br##"##INFO=<ID=PROB_SOMATIC,Number=A,Type=Float,Description="P(somatic)">"##,
+        );
+        header.push_record(br##"##FORMAT=<ID=AF,Number=A,Type=Float,Description="AF">"##);
+        header.push_sample(b"tumor");
+        header
+    }
+
+    /// Run extraction with arbitrary event list against a test VCF.
+    fn extract_with_events(
+        tmp: &NamedTempFile,
+        events: &[&str],
+    ) -> (Vec<RegionSummary>, ExtractionStats) {
+        let mut vcf = bcf::Reader::from_path(tmp.path()).unwrap();
+        extract_regions(
+            &mut vcf,
+            "tumor",
+            0,
+            &events.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            false,
+        )
+        .unwrap()
+    }
+
+    /// Run extraction with the single "somatic" event - covers the common case.
+    /// Thin wrapper around [`extract_with_events`].
+    fn extract_somatic(tmp: &NamedTempFile) -> (Vec<RegionSummary>, ExtractionStats) {
+        extract_with_events(tmp, &["somatic"])
+    }
 
     /* ====== RegionSummary::from_region_id ======= */
 
@@ -307,5 +402,355 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("chr1:abc-2000"));
         assert!(msg.contains("not a valid integer"));
+    }
+
+    /* ====== extract_regions tests =============== */
+
+    #[test]
+    fn test_non_ms_record_skipped() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        // Non-MS — no REGION_ID
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(500);
+        r.set_alleles(&[b"A", b"T"]).unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.5_f32]).unwrap();
+        r.push_format_float(b"AF", &[0.3_f32]).unwrap();
+        w.write(&r).unwrap();
+
+        // MS record
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+        r.push_format_float(b"AF", &[0.8_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+        assert_eq!(stats.total_records, 2);
+        assert_eq!(stats.skipped_non_ms, 1);
+        assert_eq!(stats.total_ms_regions, 1);
+        assert_eq!(regions.len(), 1);
+    }
+
+    #[test]
+    fn test_two_records_same_region_grouped() {
+        // Two records with same REGION_ID - one RegionSummary, two Variants
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        for (pos, prob, af) in [(999, 0.9_f32, 0.8_f32), (1002, 0.7, 0.5)] {
+            let mut r = w.empty_record();
+            r.set_rid(Some(0));
+            r.set_pos(pos);
+            r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+            r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+                .unwrap();
+            r.push_info_float(b"PROB_SOMATIC", &[prob]).unwrap();
+            r.push_format_float(b"AF", &[af]).unwrap();
+            w.write(&r).unwrap();
+        }
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+        assert_eq!(stats.total_ms_regions, 1);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].variants.len(), 2);
+    }
+
+    #[test]
+    fn test_prob_absent_computed_correctly() {
+        // prob_somatic=0.9 -> prob_absent=0.1
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+        r.push_format_float(b"AF", &[0.8_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, _) = extract_somatic(&tmp);
+        let v = &regions[0].variants[0];
+        assert!((v.prob_absent - 0.1).abs() < TEST_EPSILON_LOOSE);
+        assert!((v.af - 0.8).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_dummy_counted_has_real_indel_false() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(1002);
+        r.set_alleles(&[b"GCAG", b"G"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_flag(MSI_DUMMY_TAG).unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.001_f32]).unwrap();
+        r.push_format_float(b"AF", &[0.0_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+        assert_eq!(stats.dummy_records, 1);
+        assert_eq!(regions.len(), 1);
+        assert!(!regions[0].has_real_indel);
+        assert!((regions[0].variants[0].prob_absent - 0.999).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_real_record_sets_has_real_indel() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+        r.push_format_float(b"AF", &[0.8_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, _) = extract_somatic(&tmp);
+        assert!(regions[0].has_real_indel);
+    }
+
+    #[test]
+    fn test_multiple_regions_sorted_by_chrom_start() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        for (rid, pos, region_id) in [
+            (0, 2002, b"chr1:2000-2030" as &[u8]),
+            (0, 999, b"chr1:1000-1030"),
+            (1, 499, b"chr2:500-530"),
+        ] {
+            let mut r = w.empty_record();
+            r.set_rid(Some(rid));
+            r.set_pos(pos);
+            r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+            r.push_info_string(MSI_REGION_ID_TAG, &[region_id]).unwrap();
+            r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+            r.push_format_float(b"AF", &[0.8_f32]).unwrap();
+            w.write(&r).unwrap();
+        }
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+        assert_eq!(stats.total_ms_regions, 3);
+        assert_eq!(regions[0].region_id, "chr1:1000-1030");
+        assert_eq!(regions[1].region_id, "chr1:2000-2030");
+        assert_eq!(regions[2].region_id, "chr2:500-530");
+    }
+
+    #[test]
+    fn test_non_contiguous_same_region_grouped_via_hashmap() {
+        // region1 / region2 / region1 - HashMap handles non-contiguous correctly
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        for (pos, region_id) in [
+            (999, b"chr1:1000-1030" as &[u8]),
+            (1999, b"chr1:2000-2030"),
+            (1002, b"chr1:1000-1030"), // same as first - non-contiguous
+        ] {
+            let mut r = w.empty_record();
+            r.set_rid(Some(0));
+            r.set_pos(pos);
+            r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+            r.push_info_string(MSI_REGION_ID_TAG, &[region_id]).unwrap();
+            r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+            r.push_format_float(b"AF", &[0.8_f32]).unwrap();
+            w.write(&r).unwrap();
+        }
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+        assert_eq!(stats.total_ms_regions, 2);
+        assert_eq!(regions[0].region_id, "chr1:1000-1030");
+        assert_eq!(regions[0].variants.len(), 2);
+        assert_eq!(regions[1].region_id, "chr1:2000-2030");
+        assert_eq!(regions[1].variants.len(), 1);
+    }
+
+    #[test]
+    fn test_two_alts_different_regions_each_registered() {
+        // One record, two ALTs, each matching a different region via Number=A
+        // ALT0: ACAGCAG -> indel_pos=1001 -> chr1:1001-1030
+        // ALT1: A       -> indel_pos=998  -> chr1:992-1000
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(997);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG", b"G"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1001-1030", b"chr1:992-1000"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32, 0.7_f32])
+            .unwrap();
+        r.push_format_float(b"AF", &[0.6_f32, 0.4_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+
+        assert_eq!(stats.total_ms_regions, 2);
+        assert_eq!(regions.len(), 2);
+
+        // After sort by (chrom, start): chr1:992-1000 first
+        assert_eq!(regions[0].region_id, "chr1:992-1000");
+        assert_eq!(regions[1].region_id, "chr1:1001-1030");
+
+        assert_eq!(regions[0].variants.len(), 1);
+        assert_eq!(regions[1].variants.len(), 1);
+
+        assert!(regions[0].has_real_indel);
+        assert!(regions[1].has_real_indel);
+
+        // ALT1 -> chr1:992-1000: prob_somatic=0.7 -> prob_absent≈0.3
+        assert!((regions[0].variants[0].prob_absent - 0.3).abs() < TEST_EPSILON_LOOSE);
+        // ALT0 -> chr1:1001-1030: prob_somatic=0.9 -> prob_absent≈0.1
+        assert!((regions[1].variants[0].prob_absent - 0.1).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_alt_with_dot_region_skipped() {
+        // Two ALTs: ALT0 has region, ALT1 has "." - ALT1 skipped
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(997);
+        r.set_alleles(&[b"ACAG", b"ACAGCAG", b"A"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1001-1030", b"."])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32, 0.7_f32])
+            .unwrap();
+        r.push_format_float(b"AF", &[0.6_f32, 0.4_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+        assert_eq!(stats.total_ms_regions, 1);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].region_id, "chr1:1001-1030");
+        assert_eq!(regions[0].variants.len(), 1);
+        assert!((regions[0].variants[0].prob_absent - 0.1).abs() < TEST_EPSILON_LOOSE);
+    }
+
+    #[test]
+    fn test_missing_af_skipped_counted_in_stats() {
+        // Record has REGION_ID and PROB_SOMATIC but no FORMAT:AF
+        // Region is registered but variant is skipped - skipped_missing_af increments
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+        r.push_format_float(b"AF", &[f32::missing()]).unwrap(); // missing AF
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+
+        assert_eq!(stats.skipped_missing_af, 1);
+        // Region is registered (REGION_ID was present) but has no variants
+        assert_eq!(stats.total_ms_regions, 1);
+        assert_eq!(regions[0].variants.len(), 0);
+        // has_real_indel still set - the record existed regardless of AF
+        assert!(regions[0].has_real_indel);
+    }
+
+    #[test]
+    fn test_missing_prob_skipped_counted_in_stats() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[f32::missing()])
+            .unwrap();
+        r.push_format_float(b"AF", &[0.8_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_somatic(&tmp);
+
+        assert_eq!(stats.skipped_missing_prob, 1);
+        assert_eq!(stats.total_ms_regions, 1);
+        assert_eq!(regions[0].variants.len(), 0);
+        assert!(regions[0].has_real_indel);
+    }
+
+    #[test]
+    fn test_two_event_prob_combined_correctly() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut header = make_header();
+        header.push_record(
+            br##"##INFO=<ID=PROB_HIGH_VAF,Number=A,Type=Float,Description="P(high_vaf)">"##,
+        );
+        let mut w = bcf::Writer::from_path(tmp.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.3_f32]).unwrap();
+        r.push_info_float(b"PROB_HIGH_VAF", &[0.4_f32]).unwrap();
+        r.push_format_float(b"AF", &[0.6_f32]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, _) = extract_with_events(&tmp, &["somatic", "high_vaf"]);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].variants.len(), 1);
+
+        // ln_sum_exp(ln(0.3), ln(0.4)) -> prob_events ≈ 0.7, 1 - prob_events ≈ 0.3
+        assert!(
+            (regions[0].variants[0].prob_absent - 0.3).abs() < TEST_EPSILON_LOOSE,
+            "expected prob_absent ≈ 0.3, got {}",
+            regions[0].variants[0].prob_absent
+        );
     }
 }
