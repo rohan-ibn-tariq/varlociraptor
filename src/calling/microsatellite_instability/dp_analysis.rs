@@ -27,7 +27,6 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use super::extraction::{RegionSummary, Variant};
-use crate::utils::genomics::classify_msi_status;
 use crate::utils::stats::calculate_percentage_exact;
 
 /* ============ Data Structures =================== */
@@ -70,8 +69,6 @@ pub(super) struct AfEvolutionResult {
     pub msi_score_map: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regions_with_variants: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub msi_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uncertainty_lower: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -447,21 +444,19 @@ fn calculate_msi_metrics(
     // Step 2: Run DP to get probability distribution
     let distribution_raw = run_dp_for_regions(filtered);
 
-    // Step 3: Compute k_map, msi_score_map, regions_with_variants, msi_status ONLY if pseudotime needed
-    let (k_map, msi_score_map, msi_status, regions_with_variants) = if output_req.needs_pseudotime
+    // Step 3: Compute k_map, msi_score_map, regions_with_variants ONLY if pseudotime needed
+    let (k_map, msi_score_map, regions_with_variants) = if output_req.needs_pseudotime
         && total_regions > 0
     {
         let (k_map_raw, msi_score_map_raw, _) = find_map_estimate(&distribution_raw, total_regions);
         let regions_with_variants_count = filtered.len();
-        let msi_status = classify_msi_status(msi_score_map_raw, msi_high_threshold).to_string();
         (
             Some(k_map_raw),
             Some(msi_score_map_raw),
-            Some(msi_status),
             Some(regions_with_variants_count),
         )
     } else {
-        (None, None, None, None)
+        (None, None, None)
     };
 
     // Step 4: Calculate uncertainty using exact Decimal arithmetic
@@ -537,7 +532,6 @@ fn calculate_msi_metrics(
         k_map,
         msi_score_map,
         regions_with_variants,
-        msi_status,
         uncertainty_lower,
         uncertainty_upper,
         map_std_dev,
@@ -1207,7 +1201,6 @@ mod tests {
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
         assert!(result.regions_with_variants.is_none());
-        assert!(result.msi_status.is_none());
     }
 
     #[test]
@@ -1494,7 +1487,6 @@ mod tests {
         assert_eq!(r.sample, "sample1");
         assert_eq!(r.k_map.unwrap(), 1);
         assert!((r.msi_score_map.unwrap() - 1.0).abs() < TEST_EPSILON);
-        assert_eq!(r.msi_status.as_deref(), Some("MSS"));
         assert_eq!(r.regions_with_variants.unwrap(), 1);
     }
 
@@ -1529,7 +1521,6 @@ mod tests {
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
         assert!(result.regions_with_variants.is_none());
-        assert!(result.msi_status.is_none());
         assert!(result.uncertainty_lower.is_none());
         assert!(result.uncertainty_upper.is_none());
         assert!(result.map_std_dev.is_none());
@@ -1598,11 +1589,6 @@ mod tests {
             "k_map should be 0 with no regions"
         );
         assert_eq!(af_1_0.msi_score_map.unwrap(), 0.0, "MSI score should be 0%");
-        assert_eq!(
-            af_1_0.msi_status.as_deref(),
-            Some("MSS"),
-            "Status should be MSS"
-        );
         assert!(
             af_1_0.uncertainty_lower.is_some(),
             "Uncertainty should exist with pseudotime=true"
@@ -1625,7 +1611,6 @@ mod tests {
             "MSI score should be 2.0%, got {}",
             af_0_5.msi_score_map.unwrap()
         );
-        assert_eq!(af_0_5.msi_status.as_deref(), Some("MSS"), "2% < 3.5% : MSS");
         assert!(af_0_5.uncertainty_lower.is_some());
         assert!(af_0_5.uncertainty_upper.is_some());
 
