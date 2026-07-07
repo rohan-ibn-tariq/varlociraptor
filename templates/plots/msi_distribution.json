@@ -23,7 +23,6 @@
                     "field": "probability",
                     "type": "quantitative",
                     "title": "Posterior Probability",
-                    "axis": { "labels": false }
                 },
                 "color": {
                     "field": "sample",
