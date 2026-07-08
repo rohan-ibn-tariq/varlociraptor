@@ -69,9 +69,10 @@ fn create_empty_plot(path: &Path, message: &str) -> Result<()> {
     }
 
     let file = File::create(path).context("Failed to create empty plot file")?;
-    let writer = BufWriter::new(file);
+    let mut writer = BufWriter::new(file);
 
-    serde_json::to_writer_pretty(writer, &spec).context("Failed to write empty plot")?;
+    serde_json::to_writer_pretty(&mut writer, &spec).context("Failed to write empty plot")?;
+    writer.flush().context("Failed to flush plot file")?;
 
     Ok(())
 }
@@ -173,8 +174,10 @@ fn write_plot(
     }
 
     let file = File::create(path).context("Failed to create plot file")?;
-    serde_json::to_writer_pretty(BufWriter::new(file), &spec)
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &spec)
         .context("Failed to write plot JSON")?;
+    writer.flush().context("Failed to flush plot file")?;
 
     Ok(())
 }
