@@ -1,7 +1,7 @@
 {
     "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
     "description": "MSI probability distribution at AF threshold 0.0.",
-    "title": "MSI Score Distribution (AF 0.0)",
+    "title": "PLACEHOLDER_TITLE",
     "data": { "values": [] },
     "width": 500,
     "height": 350,
@@ -22,16 +22,9 @@
                 "y": {
                     "field": "probability",
                     "type": "quantitative",
-                    "title": "Posterior Probability",
-                },
-                "color": {
-                    "field": "sample",
-                    "type": "nominal",
-                    "scale": { "scheme": "category10" },
-                    "legend": { "title": "Sample" }
+                    "title": "Posterior Probability"
                 },
                 "tooltip": [
-                    { "field": "sample", "type": "nominal", "title": "Sample" },
                     { "field": "msi_score", "type": "quantitative", "title": "MSI Score (%)", "format": ".2f" },
                     { "field": "probability", "type": "quantitative", "title": "Probability", "format": ".6f" },
                     { "field": "k", "type": "quantitative", "title": "k (unstable regions)" }
