@@ -735,6 +735,7 @@ mod tests {
     fn test_generate_heatmap_plot_empty_produces_placeholder() {
         let tmp = NamedTempFile::new().unwrap();
         generate_heatmap_plot_spec(&[], "tumor", tmp.path(), 3.5).unwrap();
+
         let content = fs::read_to_string(tmp.path()).unwrap();
         assert!(serde_json::from_str::<Value>(&content).is_ok());
         assert!(content.contains("No heatmap data"));
