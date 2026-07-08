@@ -1,6 +1,6 @@
 {
     "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
-    "title": "MSI Spatial Heatmap",
+    "title": "PLACEHOLDER_TITLE",
     "data": { "values": [] },
     "width": 800,
     "height": 400,

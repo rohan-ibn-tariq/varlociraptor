@@ -109,12 +109,14 @@ fn write_plot(
     path: &Path,
     threshold: f64,
     plot_type: PlotType,
+    title: &str,
 ) -> Result<()> {
     let mut spec: Value =
         serde_json::from_str(template).context("Failed to parse plot template")?;
 
     if let Value::Object(ref mut spec_obj) = spec {
         spec_obj["data"]["values"] = data;
+        spec_obj["title"] = json!(title);
 
         match plot_type {
             PlotType::WithThresholdLine => {
@@ -277,7 +279,6 @@ pub(super) fn generate_distribution_plot_spec(
     if let Some(distribution) = results.get("0.00").and_then(|r| r.distribution.as_ref()) {
         for dp_result in distribution {
             data.push(json!({
-                "sample": sample,
                 "k": dp_result.k,
                 "msi_score": dp_result.msi_score,
                 "probability": dp_result.probability,
@@ -291,6 +292,7 @@ pub(super) fn generate_distribution_plot_spec(
         path,
         msi_threshold,
         PlotType::WithThresholdLine,
+        &format!("MSI Score Distribution — Sample: {}", sample),
     )?;
 
     Ok(())
@@ -455,7 +457,6 @@ pub(super) fn generate_pseudotime_plot_spec(
 
         let msi_score = result.msi_score_map.unwrap_or(0.0);
         data.push(json!({
-            "sample": sample,
             "af_threshold": af_f64,
             "msi_score": msi_score,
             "lower_bound": result.uncertainty_lower.unwrap_or(msi_score),
@@ -469,6 +470,7 @@ pub(super) fn generate_pseudotime_plot_spec(
         path,
         msi_threshold,
         PlotType::WithThresholdLine,
+        &format!("MSI Evolution Across AF Thresholds — Sample: {}", sample),
     )
 }
 
@@ -550,7 +552,7 @@ pub(super) fn write_heatmap_data(
 ///
 /// # Arguments
 /// * `results`       - Windowed analysis results from `run_windowed_analysis`
-/// * `sample`        - Sample name for tooltip data
+/// * `sample`        - Sample name for title
 /// * `path`          - Output JSON file path
 /// * `msi_threshold` - MSI-High threshold for color scale midpoint and classification
 ///
@@ -576,7 +578,6 @@ pub(super) fn generate_heatmap_plot_spec(
         .iter()
         .map(|r| {
             json!({
-                "sample": sample,
                 "chrom": r.chrom,
                 "window_start": r.window_start,
                 "window_end": r.window_end,
@@ -594,6 +595,7 @@ pub(super) fn generate_heatmap_plot_spec(
         path,
         msi_threshold,
         PlotType::Heatmap,
+        &format!("MSI Spatial Heatmap — Sample: {}", sample),
     )
 }
 
