@@ -1,1 +1,742 @@
+//! output.rs
+//!
+//! Output generation for MSI analysis.
+//!
+//! This module provides functions to generate six types of outputs:
+//! 1. **Distribution data (TSV)**: Probability distribution P(K=k) at AF=0.0
+//! 2. **Distribution plot (Vega-Lite JSON)**: Scatter plot of distribution
+//! 3. **Pseudotime data (TSV)**: MSI score evolution across AF thresholds
+//! 4. **Pseudotime plot (Vega-Lite JSON)**: Line plot with uncertainty bands
+//! 5. **Heatmap data (TSV)**: Windowed MSI scores across the genome
+//! 6. **Heatmap plot (Vega-Lite JSON)**: Spatial rect heatmap by chromosome
+//!
+//! Types 1-4 use `AfEvolutionResult` from DP analysis.
+//! Types 5-6 use `WindowResult` from windowed analysis.
+//!
+//! # Output Requirements
+//! Each function is called only when the corresponding `OutputRequirements`
+//! flag is set, checked in upstream.
+//!
 
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use serde_json::{json, Value};
+
+use super::dp_analysis::{AfEvolutionResult, WindowResult};
+use crate::utils::genomics::classify_msi_status;
+
+/* ============ Data Structures =================== */
+
+/// Determines which template mutations `write_plot` applies
+/// when injecting threshold values into a Vega-Lite specification.
+enum PlotType {
+    /// Updates datum in rule/text layers - works for both vertical (distribution)
+    /// and horizontal (pseudotime) threshold lines since the layer detection
+    /// finds whichever axis has a datum field.
+    WithThresholdLine,
+    /// Updates color scale domain midpoint for diverging coloring.
+    Heatmap,
+}
+
+/* ================================================ */
+
+/* ============ Plotting Utils ==================== */
+
+/// Create empty plot with informative message.
+///
+/// Uses embedded template from `templates/plots/msi_empty.json`.
+/// Replaces "PLACEHOLDER_MESSAGE" with actual message.
+///
+/// # Arguments
+/// * `path` - Output file path
+/// * `message` - Text to display (e.g., "No distribution data available")
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation or JSON parsing fails
+fn create_empty_plot(path: &Path, message: &str) -> Result<()> {
+    let template = include_str!("../../../templates/plots/msi_empty.json");
+
+    let mut spec: Value =
+        serde_json::from_str(template).context("Failed to parse empty plot template")?;
+
+    if let Value::Object(ref mut spec_obj) = spec {
+        spec_obj["mark"]["text"] = json!(message);
+    }
+
+    let file = File::create(path).context("Failed to create empty plot file")?;
+    let writer = BufWriter::new(file);
+
+    serde_json::to_writer_pretty(writer, &spec).context("Failed to write empty plot")?;
+
+    Ok(())
+}
+
+/// Load Vega-Lite template, inject data, apply threshold mutation,
+/// and write pretty-printed JSON to file.
+///
+/// # How It Works
+/// 1. Parse template JSON from embedded string
+/// 2. Inject data array into `data.values`
+/// 3. Apply plot-type-specific threshold mutation (see below)
+/// 4. Write pretty-printed JSON to file
+///
+/// # Plot Type Behavior
+/// - `WithThresholdLine`: Finds rule and text layers by mark type,
+///   then updates whichever of X or Y encoding has a `datum` field.
+///   Distribution uses X datum (vertical line), Pseudotime uses Y datum
+///   (horizontal line) - detection handles both without branching.
+/// - `Heatmap`: Updates `encoding.color.scale.domain[1]` to set the
+///   diverging color scale midpoint at the MSI-High threshold.
+///
+/// # Arguments
+/// * `data`      - Data array to inject into `data.values`
+/// * `template`  - Embedded template string
+/// * `path`      - Output file path
+/// * `threshold` - MSI-High threshold value
+/// * `plot_type` - Controls which template mutation is applied
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation, JSON parsing, or writing fails
+fn write_plot(
+    data: Value,
+    template: &str,
+    path: &Path,
+    threshold: f64,
+    plot_type: PlotType,
+) -> Result<()> {
+    let mut spec: Value =
+        serde_json::from_str(template).context("Failed to parse plot template")?;
+
+    if let Value::Object(ref mut spec_obj) = spec {
+        spec_obj["data"]["values"] = data;
+
+        match plot_type {
+            PlotType::WithThresholdLine => {
+                if let Some(layers) = spec_obj.get_mut("layer").and_then(|v| v.as_array_mut()) {
+                    for layer in layers {
+                        let mark_type = layer
+                            .get("mark")
+                            .and_then(|m| m.get("type"))
+                            .and_then(|t| t.as_str());
+
+                        let is_threshold_layer = mark_type == Some("rule")
+                            || (mark_type == Some("text")
+                                && layer
+                                    .get("encoding")
+                                    .and_then(|e| e.get("text"))
+                                    .and_then(|t| t.get("value"))
+                                    .and_then(|v| v.as_str())
+                                    == Some("MSI Threshold"));
+
+                        if !is_threshold_layer {
+                            continue;
+                        }
+
+                        // Update whichever axis has a datum field
+                        // Distribution uses X, Pseudotime uses Y -
+                        // detection handles both without branching
+                        for axis in ["x", "y"] {
+                            if let Some(enc) =
+                                layer.get_mut("encoding").and_then(|e| e.get_mut(axis))
+                            {
+                                if enc.get("datum").is_some() {
+                                    enc["datum"] = json!(threshold);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            PlotType::Heatmap => {
+                if let Some(domain) = spec_obj
+                    .get_mut("encoding")
+                    .and_then(|e| e.get_mut("color"))
+                    .and_then(|c| c.get_mut("scale"))
+                    .and_then(|s| s.get_mut("domain"))
+                    .and_then(|d| d.as_array_mut())
+                {
+                    if domain.len() == 3 {
+                        domain[1] = json!(threshold);
+                    }
+                }
+            }
+        }
+    }
+
+    let file = File::create(path).context("Failed to create plot file")?;
+    serde_json::to_writer_pretty(BufWriter::new(file), &spec)
+        .context("Failed to write plot JSON")?;
+
+    Ok(())
+}
+
+/* ================================================ */
+
+/* === Output Functions Type 1: Distribution ====== */
+
+/// Write MSI probability distribution data to TSV file.
+///
+/// Outputs the complete probability distribution P(K=k) at AF=0.0,
+/// where k is the number of unstable microsatellite regions.
+///
+/// # Output Format
+/// Tab-separated values with header:
+/// ```text
+/// sample  k   msi_score(threshold=3.5)    probability
+/// tumor   0   0.00    0.420000
+/// tumor   1   1.00    0.460000
+/// tumor   2   2.00    0.120000
+/// ```
+///
+/// # Arguments
+/// * `results`       - Flat HashMap keyed by AF threshold string (e.g. "0.00")
+/// * `sample`        - Sample name written to the first column of each row
+/// * `path`          - Output TSV file path
+/// * `msi_threshold` - MSI-High threshold for column header label
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation or writing fails
+///
+/// # Example
+/// ```ignore
+/// write_distribution_data(&results, "sample", Path::new("dist.tsv"), 3.5)?;
+/// ```
+pub(super) fn write_distribution_data(
+    results: &HashMap<String, AfEvolutionResult>,
+    sample: &str,
+    path: &Path,
+    msi_threshold: f64,
+) -> Result<()> {
+    let file = File::create(path).context("Failed to create Distribution data TSV.")?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(
+        writer,
+        "sample\tk\tmsi_score(threshold={:.1})\tprobability",
+        msi_threshold
+    )?;
+
+    if let Some(distribution) = results.get("0.00").and_then(|r| r.distribution.as_ref()) {
+        for dp_result in distribution {
+            writeln!(
+                writer,
+                "{}\t{}\t{:.2}\t{:.12}",
+                sample, dp_result.k, dp_result.msi_score, dp_result.probability
+            )?;
+        }
+    }
+
+    writer.flush().context("Failed to flush distribution TSV")?;
+
+    Ok(())
+}
+
+/// Generate Vega-Lite plot specification for MSI probability distribution.
+///
+/// Creates a scatter plot showing the probability distribution P(K=k) at AF=0.0,
+/// with a vertical threshold line indicating the MSI-High cutoff.
+///
+/// Uses embedded template from `templates/plots/msi_distribution.json`.
+///
+/// # Plot Features
+/// - **Scatter points**: MSI score (x-axis) vs posterior probability (y-axis)
+/// - **Vertical threshold line**: Red dashed line at MSI-High cutoff
+/// - **"MSI Threshold" label**: Text annotation at threshold position
+/// - **Interactive tooltips**: MSI score, probability, k value
+///
+/// # Arguments
+/// * `results`       - Flat HashMap keyed by AF threshold string (e.g. "0.00")
+/// * `sample`        - Sample name for plot title.
+/// * `path`          - Output JSON file path (Vega-Lite specification)
+/// * `msi_threshold` - MSI-High threshold for vertical line position
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation, template parsing, or writing fails
+///
+/// # Example
+/// ```ignore
+/// generate_distribution_plot_spec(&results, "tumor", Path::new("dist.vl.json"), 3.5)?;
+/// ```
+pub(super) fn generate_distribution_plot_spec(
+    results: &HashMap<String, AfEvolutionResult>,
+    sample: &str,
+    path: &Path,
+    msi_threshold: f64,
+) -> Result<()> {
+    let mut data = Vec::new();
+
+    if let Some(distribution) = results.get("0.00").and_then(|r| r.distribution.as_ref()) {
+        for dp_result in distribution {
+            data.push(json!({
+                "sample": sample,
+                "k": dp_result.k,
+                "msi_score": dp_result.msi_score,
+                "probability": dp_result.probability,
+            }));
+        }
+    }
+
+    write_plot(
+        json!(data),
+        include_str!("../../../templates/plots/msi_distribution.json"),
+        path,
+        msi_threshold,
+        PlotType::WithThresholdLine,
+    )?;
+
+    Ok(())
+}
+
+/* ================================================ */
+
+/* === Output Functions Type 2: Pseudotime ======== */
+
+/// Write MSI pseudotime evolution trajectory data to TSV file.
+///
+/// Outputs MSI scores and uncertainty bounds across AF thresholds,
+/// showing how MSI score evolves as variant detection threshold changes.
+///
+/// # Output Format
+/// Tab-separated values, sorted highest to lowest AF threshold.
+/// ```text
+/// sample    af_threshold    msi_score(threshold=3.5)    k_map    regions_with_variants    msi_status    uncertainty_lower    uncertainty_upper    map_std_dev
+/// tumor     1.0             0.00                       0        20                       MSS          0.00                0.00                 0.000000
+/// tumor     0.8             2.50                       2        35                       MSS          1.80                3.20                 0.700000
+/// ```
+///
+/// # Arguments
+/// * `results`       - Flat HashMap keyed by AF threshold string
+/// * `sample`        - Sample name written to the first column of each row
+/// * `path`          - Output TSV file path
+/// * `msi_threshold` - MSI-High threshold for column header
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation or writing fails
+///
+/// # Example
+/// ```ignore
+/// write_pseudotime_data(&results, "tumor", Path::new("pseudo.tsv"), 3.5)?;
+/// ```
+pub(super) fn write_pseudotime_data(
+    results: &HashMap<String, AfEvolutionResult>,
+    sample: &str,
+    path: &Path,
+    msi_threshold: f64,
+) -> Result<()> {
+    let file = File::create(path).context("Failed to create Pseudotime data TSV.")?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(
+        writer,
+        "sample\taf_threshold\tmsi_score(threshold={:.1})\tk_map\tregions_with_variants\tmsi_status\tuncertainty_lower\tuncertainty_upper\tmap_std_dev",
+        msi_threshold
+    )?;
+
+    let mut af_pairs: Vec<(f64, String)> = results
+        .keys()
+        .filter_map(|af_str| {
+            af_str
+                .parse::<f64>()
+                .ok()
+                .map(|af_f64| (af_f64, af_str.clone()))
+        })
+        .collect();
+
+    af_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+
+    for (af_f64, af_str) in af_pairs {
+        let result = match results.get(&af_str) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let lower = result
+            .uncertainty_lower
+            .map(|v| format!("{:.4}", v))
+            .unwrap_or_else(|| "NA".to_string());
+        let upper = result
+            .uncertainty_upper
+            .map(|v| format!("{:.4}", v))
+            .unwrap_or_else(|| "NA".to_string());
+        let std_dev = result
+            .map_std_dev
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_else(|| "NA".to_string());
+
+        writeln!(
+            writer,
+            "{}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}",
+            sample,
+            af_f64,
+            result.msi_score_map.unwrap_or(0.0),
+            result.k_map.unwrap_or(0),
+            result.regions_with_variants.unwrap_or(0),
+            result
+                .msi_score_map
+                .map(|s| classify_msi_status(s, msi_threshold))
+                .unwrap_or("NA"),
+            lower,
+            upper,
+            std_dev
+        )?;
+    }
+
+    writer.flush().context("Failed to flush pseudotime TSV")?;
+    Ok(())
+}
+
+/// Generate Vega-Lite plot specification for MSI pseudotime evolution.
+///
+/// Creates a line plot with uncertainty band showing MSI score trajectory
+/// across AF thresholds, with a horizontal threshold line.
+///
+/// Uses embedded template from `templates/plots/msi_pseudotime.json`.
+///
+/// # Plot Features
+/// - **Area band**: Shaded uncertainty range (lower to upper bound)
+/// - **Line with points**: MSI score trajectory across AF thresholds
+/// - **Horizontal threshold line**: Red dashed line at MSI-High cutoff
+/// - **Threshold label**: Text annotation at threshold position
+/// - **Reversed X-axis**: 1.0 (left) to 0.0 (right), showing temporal flow
+/// - **Interactive tooltips**: AF threshold, MSI score, bounds
+///
+/// # Uncertainty Handling
+/// If uncertainty bounds are absent, MSI score is used for both bounds.
+///
+/// # Arguments
+/// * `results`       - Flat HashMap keyed by AF threshold string
+/// * `sample`        - Sample name for plot title.
+/// * `path`          - Output JSON file path (Vega-Lite specification)
+/// * `msi_threshold` - MSI-High threshold for horizontal line position
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation, template parsing, or writing fails
+///
+/// # Example
+/// ```ignore
+/// generate_pseudotime_plot_spec(&results, "tumor", Path::new("pseudo.vl.json"), 3.5)?;
+/// ```
+pub(super) fn generate_pseudotime_plot_spec(
+    results: &HashMap<String, AfEvolutionResult>,
+    sample: &str,
+    path: &Path,
+    msi_threshold: f64,
+) -> Result<()> {
+    let mut data = Vec::new();
+
+    let mut af_pairs: Vec<(f64, String)> = results
+        .keys()
+        .filter_map(|af_str| {
+            af_str
+                .parse::<f64>()
+                .ok()
+                .map(|af_f64| (af_f64, af_str.clone()))
+        })
+        .collect();
+
+    af_pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    for (af_f64, af_str) in &af_pairs {
+        let result = match results.get(af_str) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let msi_score = result.msi_score_map.unwrap_or(0.0);
+        data.push(json!({
+            "sample": sample,
+            "af_threshold": af_f64,
+            "msi_score": msi_score,
+            "lower_bound": result.uncertainty_lower.unwrap_or(msi_score),
+            "upper_bound": result.uncertainty_upper.unwrap_or(msi_score),
+        }));
+    }
+
+    write_plot(
+        json!(data),
+        include_str!("../../../templates/plots/msi_pseudotime.json"),
+        path,
+        msi_threshold,
+        PlotType::WithThresholdLine,
+    )
+}
+
+/* ================================================ */
+
+/* === Output Functions Type 3: Heatmap =========== */
+
+/// Write windowed MSI heatmap data to TSV file.
+///
+/// Each row represents one genomic window with its MSI score,
+/// posterior probability, and MSI-High classification.
+///
+/// # Output Format
+/// ```text
+/// sample  chrom  window_start  window_end  msi_score(threshold=3.5)  posterior_probability  regions_in_window  msi_status
+/// tumor   chr1   0             1000000     2.5000                    0.820000               40                 MSS
+/// ```
+///
+/// # Arguments
+/// * `results`       - Windowed analysis results from `run_windowed_analysis`
+/// * `sample`        - Sample name for the first column
+/// * `path`          - Output TSV file path
+/// * `msi_threshold` - MSI-High threshold for column header and classification
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation or writing fails
+///
+/// # Example
+/// ```ignore
+/// write_heatmap_data(&results, "tumor", Path::new("heatmap.tsv"), 3.5)?;
+/// ```
+pub(super) fn write_heatmap_data(
+    results: &[WindowResult],
+    sample: &str,
+    path: &Path,
+    msi_threshold: f64,
+) -> Result<()> {
+    let file = File::create(path).context("Failed to create heatmap TSV")?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(
+        writer,
+        "sample\tchrom\twindow_start\twindow_end\tmsi_score(threshold={:.1})\tposterior_probability\tregions_in_window\tmsi_status",
+        msi_threshold
+    )?;
+
+    for r in results {
+        writeln!(
+            writer,
+            "{}\t{}\t{}\t{}\t{:.4}\t{:.6}\t{}\t{}",
+            sample,
+            r.chrom,
+            r.window_start,
+            r.window_end,
+            r.msi_score,
+            r.posterior_probability,
+            r.regions_in_window,
+            classify_msi_status(r.msi_score, msi_threshold),
+        )?;
+    }
+
+    writer.flush().context("Failed to flush heatmap TSV")?;
+    Ok(())
+}
+
+/// Generate Vega-Lite plot specification for windowed MSI heatmap.
+///
+/// Creates a diverging-color rect heatmap where:
+/// - X-axis: genomic window position (start to end)
+/// - Y-axis: chromosome (ordinal, genomic order preserved via sort:null)
+/// - Color:  MSI score - blue (stable) through soft yellow (threshold) to red (unstable)
+/// - Opacity: posterior probability (confidence in the score)
+/// - Tooltip: includes MSI-High/MSS classification at the given threshold
+///
+/// Uses `write_plot` with embedded template `templates/plots/msi_heatmap.json`.
+/// `write_plot` dynamically updates the color scale midpoint to match
+/// `msi_threshold` - the template uses a 3-point domain [0, threshold, 100].
+///
+/// # Arguments
+/// * `results`       - Windowed analysis results from `run_windowed_analysis`
+/// * `sample`        - Sample name for tooltip data
+/// * `path`          - Output JSON file path
+/// * `msi_threshold` - MSI-High threshold for color scale midpoint and classification
+///
+/// # Returns
+/// * `Ok(())` on success
+/// * `Err` if file creation, template parsing, or writing fails
+///
+/// # Example
+/// ```ignore
+/// generate_heatmap_plot_spec(&results, "tumor", Path::new("heatmap.vl.json"), 3.5)?;
+/// ```
+pub(super) fn generate_heatmap_plot_spec(
+    results: &[WindowResult],
+    sample: &str,
+    path: &Path,
+    msi_threshold: f64,
+) -> Result<()> {
+    if results.is_empty() {
+        return create_empty_plot(path, "No heatmap data!!");
+    }
+
+    let data: Vec<Value> = results
+        .iter()
+        .map(|r| {
+            json!({
+                "sample": sample,
+                "chrom": r.chrom,
+                "window_start": r.window_start,
+                "window_end": r.window_end,
+                "msi_score": r.msi_score,
+                "posterior_probability": r.posterior_probability,
+                "regions_in_window": r.regions_in_window,
+                "msi_status": classify_msi_status(r.msi_score, msi_threshold),
+            })
+        })
+        .collect();
+
+    write_plot(
+        json!(data),
+        include_str!("../../../templates/plots/msi_heatmap.json"),
+        path,
+        msi_threshold,
+        PlotType::Heatmap,
+    )
+}
+
+/* ================================================ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::NamedTempFile;
+
+    use crate::calling::microsatellite_instability::dp_analysis::{
+        AfEvolutionResult, DpResult, WindowResult,
+    };
+
+    /* ====== Test helpers ======================== */
+
+    fn make_distribution_result() -> HashMap<String, AfEvolutionResult> {
+        let mut m = HashMap::new();
+        m.insert(
+            "0.00".to_string(),
+            AfEvolutionResult {
+                sample: "tumor".to_string(),
+                af_threshold: 0.0,
+                k_map: None,
+                msi_score_map: None,
+                regions_with_variants: None,
+                uncertainty_lower: None,
+                uncertainty_upper: None,
+                map_std_dev: None,
+                distribution: Some(vec![
+                    DpResult {
+                        k: 0,
+                        msi_score: 0.0,
+                        probability: 0.6,
+                    },
+                    DpResult {
+                        k: 1,
+                        msi_score: 50.0,
+                        probability: 0.4,
+                    },
+                ]),
+            },
+        );
+        m
+    }
+
+    fn make_pseudotime_result() -> HashMap<String, AfEvolutionResult> {
+        let mut m = HashMap::new();
+        m.insert(
+            "0.00".to_string(),
+            AfEvolutionResult {
+                sample: "tumor".to_string(),
+                af_threshold: 0.0,
+                k_map: Some(2),
+                msi_score_map: Some(2.0),
+                regions_with_variants: Some(10),
+                uncertainty_lower: Some(1.0),
+                uncertainty_upper: Some(3.0),
+                map_std_dev: Some(0.5),
+                distribution: None,
+            },
+        );
+        m
+    }
+
+    fn make_window_results() -> Vec<WindowResult> {
+        vec![WindowResult {
+            chrom: "chr1".to_string(),
+            window_start: 0,
+            window_end: 1_000_000,
+            msi_score: 2.5,
+            posterior_probability: 0.8,
+            regions_in_window: 40,
+        }]
+    }
+
+    /* ====== Distribution TSV =================== */
+
+    #[test]
+    fn test_write_distribution_data_row_written() {
+        let tmp = NamedTempFile::new().unwrap();
+        write_distribution_data(&make_distribution_result(), "tumor", tmp.path(), 3.5).unwrap();
+        
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        assert_eq!(content.lines().count(), 3); // header + 2 rows
+        
+        let first_row = content.lines().nth(1).unwrap();
+        assert!(first_row.starts_with("tumor"));
+        assert!(first_row.contains("0.00")); // msi_score k=0
+        assert!(first_row.contains("0.6")); // probability k=0
+    }
+
+    /* ====== Pseudotime TSV ===================== */
+
+    #[test]
+    fn test_write_pseudotime_data_row_written() {
+        let tmp = NamedTempFile::new().unwrap();
+        write_pseudotime_data(&make_pseudotime_result(), "tumor", tmp.path(), 3.5).unwrap();
+
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        assert_eq!(content.lines().count(), 2); // header + one row
+
+        let row = content.lines().nth(1).unwrap();
+        assert!(row.starts_with("tumor"));
+        assert!(row.contains("0.00")); // af_threshold
+        assert!(row.contains("2.00")); // msi_score
+        assert!(row.contains("MSS")); // MSI status
+    }
+
+    /* ====== Heatmap TSV ======================== */
+
+    #[test]
+    fn test_write_heatmap_data_empty_writes_header_only() {
+        let tmp = NamedTempFile::new().unwrap();
+        write_heatmap_data(&[], "tumor", tmp.path(), 3.5).unwrap();
+
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        assert_eq!(content.lines().count(), 1); // header only
+        assert!(content.contains("chrom"));
+    }
+
+    #[test]
+    fn test_write_heatmap_data_row_written() {
+        let tmp = NamedTempFile::new().unwrap();
+        write_heatmap_data(&make_window_results(), "tumor", tmp.path(), 3.5).unwrap();
+
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        assert_eq!(content.lines().count(), 2); // header + one row
+
+        let row = content.lines().nth(1).unwrap();
+        assert!(row.starts_with("tumor"));
+        assert!(row.contains("chr1"));
+        assert!(row.contains("MSS")); // MSI status
+        assert!(row.contains("0.8000")); // posterior
+    }
+
+    #[test]
+    fn test_generate_heatmap_plot_empty_produces_placeholder() {
+        let tmp = NamedTempFile::new().unwrap();
+        generate_heatmap_plot_spec(&[], "tumor", tmp.path(), 3.5).unwrap();
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        assert!(serde_json::from_str::<Value>(&content).is_ok());
+        assert!(content.contains("No heatmap data"));
+    }
+}
