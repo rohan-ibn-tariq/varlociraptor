@@ -32,6 +32,8 @@
 //! - `Exclusion` - Sample exclusion operations
 //! - `Count` - Counting operations
 //! - `Threshold` - Threshold validation
+//! - `AfThreshold` - Allele frequency threshold validation
+//! - `DistributionAf` - Microsatellite Distribution output type AF validation 
 //! - `Motif` - Motif pattern operations (MSI)
 //! - `Output` - Output configuration (MSI)
 //! - `Events` - Event validation operations
@@ -216,8 +218,7 @@ pub(crate) enum Error {
     UnrealisticIsizeSd,
     #[error("given field for variant heterozygosity or variant somatic effective mutation rate has to have as many entries as ALT alleles in the record")]
     InvalidVariantPrior,
-
-    /* ======================= MSI: Estimation Errors ================ */
+    /* ========== MSI: Calling & Preprocessing Errors ================ */
     /* -------------------- Configuration ---------------------------- */
     #[error(
         "invalid MSI threshold: must be > {} (default: {}), got {threshold}",
@@ -225,6 +226,16 @@ pub(crate) enum Error {
         DEFAULT_MSI_THRESHOLD
     )]
     MsiConfigThresholdInvalid { threshold: f64 },
+    #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold}")]
+    MsiConfigAfThresholdInvalid { threshold: f64 },
+    #[error(
+        "--distribution-af ({distribution_af}) is not present in the AF threshold list {af_thresholds:?}. \
+        Choose a value already in the af-thresholds list."
+    )]
+    MsiConfigDistributionAfMissing {
+        distribution_af: f64,
+        af_thresholds: Vec<f64>,
+    },
     #[error("at least one output must be specified: use --plot-pseudotime, --plot-distribution, --data-pseudotime, or --data-distribution")]
     MsiConfigOutputMissing,
     /* -------------------- BED File Errors -------------------------- */
@@ -237,7 +248,6 @@ pub(crate) enum Error {
     /* -------------------- Processing Errors ------------------------ */
     #[error("No chromosome match between BED and VCF files. Verify chromosome naming is consistent (e.g., 'chr1' vs '1')")]
     MsiVcfChromMismatch,
-    /* ======================= MSI: Preprocessing Errors ============= */
     /* -------------------- VCF/BED Interaction ---------------------- */
     #[error("Chromosome '{chrom}' from BED file not found in VCF header. Ensure chromosome naming is consistent (e.g., 'chr1' vs '1')")]
     MsiChromosomeNotFound { chrom: String },
