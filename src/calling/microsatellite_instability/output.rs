@@ -175,8 +175,7 @@ fn write_plot(
 
     let file = File::create(path).context("Failed to create plot file")?;
     let mut writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, &spec)
-        .context("Failed to write plot JSON")?;
+    serde_json::to_writer_pretty(&mut writer, &spec).context("Failed to write plot JSON")?;
     writer.flush().context("Failed to flush plot file")?;
 
     Ok(())
@@ -682,10 +681,10 @@ mod tests {
     fn test_write_distribution_data_row_written() {
         let tmp = NamedTempFile::new().unwrap();
         write_distribution_data(&make_distribution_result(), "tumor", tmp.path(), 3.5).unwrap();
-        
+
         let content = fs::read_to_string(tmp.path()).unwrap();
         assert_eq!(content.lines().count(), 3); // header + 2 rows
-        
+
         let first_row = content.lines().nth(1).unwrap();
         assert!(first_row.starts_with("tumor"));
         assert!(first_row.contains("0.00")); // msi_score k=0
