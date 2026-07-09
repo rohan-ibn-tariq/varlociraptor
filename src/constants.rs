@@ -20,6 +20,10 @@ use std::collections::HashSet;
 //
 // Use standard_omit_aux_info!() macro instead of a constant for this string.
 
+/// Floating-point tolerance for threshold/equality comparisons in production code
+/// (e.g. checking whether a configured AF value is present in a complete list).
+pub(crate) const EPSILON: f64 = 1e-9;
+
 /* =============== MSI: CONSTANTS ================== */
 
 /// Default MSI-High threshold (percentage).
@@ -56,6 +60,16 @@ pub(crate) const MSI_REGION_ID_HEADER: &[u8] =
 /// Full VCF header declaration for MSI_DUMMY INFO field.
 pub(crate) const MSI_DUMMY_HEADER: &[u8] =
     br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##;
+
+/// Default AF threshold for full distribution output.
+/// Variants with AF >= this threshold are included in the full distribution output.
+/// This AF threshold value is supported by the literature : https://pmc.ncbi.nlm.nih.gov/articles/PMC8172533/.
+pub(crate) const MSI_DEFAULT_DISTRIBUTION_AF: &str = "0.05";
+
+/// Default AF threshold for windowed heatmap analysis.
+/// Variants with AF >= this threshold are included in the windowed heatmap analysis.
+/// This AF threshold value is supported by the literature : https://pmc.ncbi.nlm.nih.gov/articles/PMC8172533/.
+pub(crate) const MSI_DEFAULT_WINDOWED_AF: &str = "0.05";
 
 lazy_static! {
     /// INFO fields copied explicitly from input to output in MSI preprocessing.
