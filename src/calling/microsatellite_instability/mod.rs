@@ -20,7 +20,7 @@ use log::info;
 use rust_htslib::bcf::{self, header::HeaderView, Read};
 
 use crate::cli::validate_vcf_file;
-use crate::constants::{DEFAULT_SLIDING_WINDOW_SIZE, MIN_MSI_THRESHOLD};
+use crate::constants::{EPSILON, MIN_MSI_THRESHOLD};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
     is_phred_scaled_from_path, validate_events_exist, validate_samples_exist,
@@ -49,9 +49,14 @@ pub(crate) struct MSIConfig {
     /// as the this field is hidden constant set at CLI level. So future changes to expose this field
     /// to users should include validation for this field.
     pub af_thresholds: Vec<f64>,
+    /// Fixed AF at which the full P(K=k) distribution is reported.
+    /// Must be present in `af_thresholds` - enforced in `validate()`.
+    pub distribution_af: f64,
+    /// Fixed AF used for windowed heatmap analysis. Independent of `af_thresholds`.
+    pub windowed_af: f64,
     /// Sliding window size (bp) for regional MSI heatmap analysis (default: 1,000,000).
     /// Only used if --plot-heatmap or --data-heatmap specified.
-    pub sliding_window: Option<u64>,
+    pub sliding_window: u64,
     /// Number of threads (None = use rayon default).
     pub threads: Option<usize>,
     /// Output path for distribution plot (Vega-Lite JSON).
@@ -76,12 +81,6 @@ impl MSIConfig {
     /// 1. Set sliding window to default if not specified and heatmap output(s) requested.
     /// 2. Set is_phred based on events sepcification.
     pub fn set_defaults(&mut self) -> Result<()> {
-        if (self.plot_heatmap.is_some() || self.data_heatmap.is_some())
-            && self.sliding_window.is_none()
-        {
-            self.sliding_window = Some(DEFAULT_SLIDING_WINDOW_SIZE);
-        }
-
         self.is_phred = is_phred_scaled_from_path(&self.calls)?;
         info!(
             "  - Probabilities are {} scaled",
