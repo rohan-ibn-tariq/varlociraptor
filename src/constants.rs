@@ -38,12 +38,19 @@ pub(crate) const DEFAULT_MSI_THRESHOLD: &str = "3.5";
 /// are not meaningful for MSI classification.
 pub(crate) const MIN_MSI_THRESHOLD: f64 = 0.0;
 
+/// Default AF thresholds for MSI evolution analysis.
+/// This list is used to generate pseudo-time series of MSI evolution at
+/// different allele frequency cutoffs. Also, this list is used to validate
+/// the --distribution-af argument, as that needs to be from the list of
+/// AF Thresholds.
+pub(crate) const MSI_DEFAULT_AF_THRESHOLDS: &str = "1.0,0.8,0.6,0.4,0.2,0.1,0.05,0.02,0.0";
+
 /// INFO fields injected by MSI preprocessing output.
 /// Added to omit set to prevent double-writing via --propagate-info-fields.
 pub(crate) const MSI_OUTPUT_INFO_FIELDS: &[&str] = &["REGION_ID", "MSI_DUMMY"];
 
 /// Sliding window size (bp) for regional MSI heatmap analysis.
-pub(crate) const DEFAULT_SLIDING_WINDOW_SIZE: u64 = 1_000_000;
+pub(crate) const MSI_DEFAULT_SLIDING_WINDOW_SIZE: &str = "1000000";
 
 /// INFO field tag for MSI region annotation.
 /// Added to variants overlapping a microsatellite region.
