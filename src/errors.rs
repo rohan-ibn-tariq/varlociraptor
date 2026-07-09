@@ -33,7 +33,7 @@
 //! - `Count` - Counting operations
 //! - `Threshold` - Threshold validation
 //! - `AfThreshold` - Allele frequency threshold validation
-//! - `DistributionAf` - Microsatellite Distribution output type AF validation 
+//! - `DistributionAf` - Microsatellite Distribution output type AF validation
 //! - `Motif` - Motif pattern operations (MSI)
 //! - `Output` - Output configuration (MSI)
 //! - `Events` - Event validation operations
