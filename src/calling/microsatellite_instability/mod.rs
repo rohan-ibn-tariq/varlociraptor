@@ -35,7 +35,7 @@ use dp_analysis::{AnalysisConfig, OutputRequirements};
 /// Contains all parameters needed for per-sample MSI analysis,
 /// populated from CLI arguments.
 #[derive(Debug)]
-pub(crate) struct MSIConfig {
+pub struct MSIConfig {
     /// Path to VCF/BCF file with variant calls.
     pub calls: PathBuf,
     /// Sample name to analyze from VCF/BCF.
@@ -261,7 +261,7 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
     if let Some(ref path) = config.data_heatmap {
         output::write_heatmap_data(&window_results, &config.sample, path, config.msi_threshold)?;
     }
-    
+
     if let Some(ref path) = config.plot_heatmap {
         output::generate_heatmap_plot_spec(
             &window_results,

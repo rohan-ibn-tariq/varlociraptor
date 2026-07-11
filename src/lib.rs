@@ -35,6 +35,9 @@ extern crate paste;
 #[macro_use]
 pub(crate) mod macros;
 pub mod calling;
+pub use calling::microsatellite_instability::{
+    call_msi, MSIConfig
+};
 pub mod candidates;
 pub mod cli;
 pub(crate) mod constants;
