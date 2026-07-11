@@ -204,6 +204,7 @@ fn write_plot(
 /// * `sample`        - Sample name written to the first column of each row
 /// * `path`          - Output TSV file path
 /// * `msi_threshold` - MSI-High threshold for column header label
+/// * `distribution_af` - Allele frequency threshold for which distribution is written
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -218,9 +219,11 @@ pub(super) fn write_distribution_data(
     sample: &str,
     path: &Path,
     msi_threshold: f64,
+    distribution_af: f64,
 ) -> Result<()> {
     let file = File::create(path).context("Failed to create Distribution data TSV.")?;
     let mut writer = BufWriter::new(file);
+    let af_key = format!("{:.2}", distribution_af);
 
     writeln!(
         writer,
@@ -228,7 +231,7 @@ pub(super) fn write_distribution_data(
         msi_threshold
     )?;
 
-    if let Some(distribution) = results.get("0.00").and_then(|r| r.distribution.as_ref()) {
+    if let Some(distribution) = results.get(&af_key).and_then(|r| r.distribution.as_ref()) {
         for dp_result in distribution {
             writeln!(
                 writer,
@@ -275,10 +278,12 @@ pub(super) fn generate_distribution_plot_spec(
     sample: &str,
     path: &Path,
     msi_threshold: f64,
+    distribution_af: f64,
 ) -> Result<()> {
     let mut data = Vec::new();
+    let af_key = format!("{:.2}", distribution_af);
 
-    if let Some(distribution) = results.get("0.00").and_then(|r| r.distribution.as_ref()) {
+    if let Some(distribution) = results.get(&af_key).and_then(|r| r.distribution.as_ref()) {
         for dp_result in distribution {
             data.push(json!({
                 "k": dp_result.k,
@@ -680,7 +685,8 @@ mod tests {
     #[test]
     fn test_write_distribution_data_row_written() {
         let tmp = NamedTempFile::new().unwrap();
-        write_distribution_data(&make_distribution_result(), "tumor", tmp.path(), 3.5).unwrap();
+        write_distribution_data(&make_distribution_result(), "tumor", tmp.path(), 3.5, 0.0)
+            .unwrap();
 
         let content = fs::read_to_string(tmp.path()).unwrap();
         assert_eq!(content.lines().count(), 3); // header + 2 rows

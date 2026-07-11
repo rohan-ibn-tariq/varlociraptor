@@ -145,9 +145,9 @@ impl<'a> FilteredRegions<'a> {
 ///
 /// Determines which expensive computations are needed based on
 /// which output files the user requested.
-/// - needs_pseudotime: For pseudotime data
-/// - needs_distribution: For distribution data
-/// - needs_heatmap: For heatmap data
+///     - needs_pseudotime: For pseudotime data
+///     - needs_distribution: For distribution data
+///     - needs_heatmap: For heatmap data
 #[derive(Debug, Clone, Copy)]
 pub(super) struct OutputRequirements {
     /// Whether to compute uncertainty bounds (std dev, lower/upper)
@@ -156,6 +156,31 @@ pub(super) struct OutputRequirements {
     pub needs_distribution: bool,
     /// Whether to compute windowed heatmap analysis
     pub needs_heatmap: bool,
+}
+
+/// Holds everything needed to run one MSI calling analysis: how much data
+/// is being analyzed, the sample name, the MSI-High classification
+/// threshold, the AF thresholds to analyze, the two fixed AF values used
+/// for the distribution and heatmap outputs, window size for heatmap analysis,
+/// and the compute resources(thread count) to use.
+#[derive(Debug)]
+pub(super) struct AnalysisConfig<'a> {
+    /// Total number of MS regions (denominator for MSI score).
+    pub total_regions: usize,
+    /// Sample name being analyzed.
+    pub sample: &'a str,
+    /// Threshold (percentage) at or above which a sample is classified MSI-High.
+    pub msi_high_threshold: f64,
+    /// Allele frequency thresholds to compute pseudotime/distribution analysis data.
+    pub af_thresholds: &'a [f64],
+    /// Thread count for the rayon pool (`None` = rayon default).
+    pub num_threads: Option<usize>,
+    /// Sliding window width (bp) for heatmap analysis.
+    pub window_size: u64,
+    /// Fixed AF at which the full P(K=k) distribution is populated.
+    pub distribution_af: f64,
+    /// Fixed AF used for windowed heatmap analysis.
+    pub windowed_af: f64,
 }
 
 /* ================================================ */
@@ -418,7 +443,7 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
 /// 3. **MAP**: Find k that maximizes P(K = k)
 /// 4. **MSI Score**: (k_map / total_regions) × 100
 /// 5. **Uncertainty** (if requested): Standard deviation bounds
-/// 6. **Distribution** (if requested and AF=0.0): Full P(K = k) array
+/// 6. **Distribution** (if requested and `af_threshold == distribution_af`): Full P(K = k) array
 ///
 /// # Arguments
 /// * `filtered` - Filtered view of variants passing AF threshold
@@ -427,6 +452,9 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
 /// * `af_threshold` - AF threshold used for filtering
 /// * `sample` - The sample being processed
 /// * `output_req` - Which outputs are requested (controls what to compute)
+/// * `distribution_af` - Fixed AF at which `distribution` is populated;
+///   `distribution` is only set when `output_req.needs_distribution` is true
+///   AND `af_threshold` equals this value
 ///
 /// # Returns
 /// Complete MSI analysis result for this sample/AF combination
@@ -437,6 +465,7 @@ fn calculate_msi_metrics(
     af_threshold: f64,
     sample: String,
     output_req: OutputRequirements,
+    distribution_af: f64,
 ) -> AfEvolutionResult {
     // Step 1: Compute region instability probabilities
     // For each region, calculate P(at least one variant present)
@@ -506,8 +535,9 @@ fn calculate_msi_metrics(
             (None, None, None)
         };
 
-    // Step 5: Create full distribution (only if distribution output requested AND AF=0.0)
-    let distribution = if output_req.needs_distribution && af_threshold == 0.0 {
+    // Step 5: Create full distribution (only if distribution output requested
+    // AND current AF threshold matches distribution_af)
+    let distribution = if output_req.needs_distribution && af_threshold == distribution_af {
         Some(
             distribution_raw
                 .iter()
@@ -707,6 +737,9 @@ fn run_windowed_analysis(
 /// * `sample`             - Sample name
 /// * `msi_high_threshold` - Threshold for MSI-High classification (%)
 /// * `af_thresholds`      - AF thresholds to analyze in parallel
+/// * `distribution_af`    - Fixed AF forwarded to `calculate_msi_metrics` on each call
+///                          marking which AF should populate the full distribution conditionally
+
 /// * `output_req`         - Which outputs to compute
 ///
 /// # Returns
@@ -717,6 +750,7 @@ fn run_global_analysis(
     sample: &str,
     msi_high_threshold: f64,
     af_thresholds: &[f64],
+    distribution_af: f64,
     output_req: OutputRequirements,
 ) -> HashMap<String, AfEvolutionResult> {
     let results = Mutex::new(HashMap::new());
@@ -735,6 +769,7 @@ fn run_global_analysis(
             *af_threshold,
             sample.to_string(),
             output_req,
+            distribution_af,
         );
         results
             .lock()
@@ -754,63 +789,67 @@ fn run_global_analysis(
 
 /// Run AF evolution analysis across AF thresholds for one sample.
 ///
-/// Performs parallel MSI analysis for each AF threshold,
-/// computing probability distributions and MSI scores.
+/// Performs parallel MSI analysis across the AF thresholds (for
+/// pseudotime/distribution outputs) and, if requested, windowed heatmap
+/// analysis across the genome.
 ///
 /// # Arguments
-/// * `regions`               - Regions with variants from extraction
-/// * `total_regions`         - Total MS regions (denominator for MSI score)
-/// * `sample`                - Sample name
-/// * `msi_high_threshold`    - Threshold for MSI-High classification (%)
-/// * `af_thresholds`         - AF thresholds to analyze
-/// * `output_req`            - Which outputs requested (controls computation)
-/// * `num_threads`           - Thread count (None = rayon default)
-/// * `window_size`           - Window width in bases for heatmap analysis
-/// * `af_threshold_windowed` - Fixed AF threshold for windowed analysis
+/// * `regions`    - Regions with variants from extraction
+/// * `config`     - Config items: total regions of interest, sample, msi threshold,
+///                  AF Thresholds for pseudotime analysis, fixed distribution/windowed AF values,
+///                  windowed heatmap window size and compute resource
+/// * `output_req` - Which outputs requested (controls computation)
 ///
 /// # Returns
 /// Tuple of `(global_results, window_results)` where:
 /// - `global_results`: HashMap keyed by AF threshold string -> MSI result.
 ///   Empty if neither pseudotime nor distribution requested.
-/// - `window_results`: `Some(Vec<WindowResult>)` if heatmap requested, else `None`
+/// - `window_results`: `Vec<WindowResult>`, empty if heatmap not requested
+///   or no windows contained regions.
 ///
 /// # Example
-/// assert_eq!(run_af_evolution_analysis(&regions, 100, "Sample1", 3.5, &[0.0, 0.1], output_req, Some(4), 1_000_000, 0.1), (global_results, Some(window_results)));
+/// assert_eq!(run_af_evolution_analysis(&regions, config, output_req), (global_results, window_results));
 pub(super) fn run_af_evolution_analysis(
     regions: &[RegionSummary],
-    total_regions: usize,
-    sample: &str,
-    msi_high_threshold: f64,
-    af_thresholds: &[f64],
+    config: AnalysisConfig<'_>,
     output_req: OutputRequirements,
-    num_threads: Option<usize>,
-    window_size: u64,
-    af_threshold_windowed: f64,
-) -> Result<(
-    HashMap<String, AfEvolutionResult>,
-    Option<Vec<WindowResult>>,
-)> {
-    info!("Sample: {:?}", sample);
-    info!("AF thresholds: {:?}", af_thresholds);
-    info!("MSI-High threshold: {}%", msi_high_threshold);
-    info!("Total regions (BED): {}", total_regions);
+) -> Result<(HashMap<String, AfEvolutionResult>, Vec<WindowResult>)> {
+    info!("Sample: {:?}", config.sample);
+    info!("AF thresholds: {:?}", config.af_thresholds);
+    info!("MSI-High threshold: {}%", config.msi_high_threshold);
+    info!("Total regions (BED): {}", config.total_regions);
     info!("Regions with variants: {}", regions.len());
     info!("Output requirements:");
     info!("    - Pseudotime: {}", output_req.needs_pseudotime);
-    info!("    - Distribution: {}", output_req.needs_distribution);
-    info!("    - Heatmap: {}", output_req.needs_heatmap);
+    if output_req.needs_distribution {
+        info!(
+            "    - Distribution (AF={}): {}",
+            config.distribution_af, output_req.needs_distribution
+        );
+    } else {
+        info!("    - Distribution: {}", output_req.needs_distribution);
+    }
+    if output_req.needs_heatmap {
+        info!(
+            "    - Heatmap (AF={}): {}",
+            config.windowed_af, output_req.needs_heatmap
+        );
+    } else {
+        info!("    - Heatmap: {}", output_req.needs_heatmap);
+    }
 
     // Step 1: Configure rayon thread pool
-    setup_thread_pool(num_threads); // once shared by both analysis functions
+    setup_thread_pool(config.num_threads); // once shared by both analysis functions
 
     // Step 2: Run global analysis — skipped if only heatmap requested
     let global_results = if output_req.needs_pseudotime || output_req.needs_distribution {
         run_global_analysis(
             regions,
-            total_regions,
-            sample,
-            msi_high_threshold,
-            af_thresholds,
+            config.total_regions,
+            config.sample,
+            config.msi_high_threshold,
+            config.af_thresholds,
+            config.distribution_af,
             output_req,
         )
     } else {
@@ -819,13 +858,9 @@ pub(super) fn run_af_evolution_analysis(
 
     // Step 3: Run windowed analysis — only if heatmap requested
     let window_results = if output_req.needs_heatmap {
-        Some(run_windowed_analysis(
-            regions,
-            af_threshold_windowed,
-            window_size,
-        ))
+        run_windowed_analysis(regions, config.windowed_af, config.window_size)
     } else {
-        None
+        Vec::new()
     };
 
     Ok((global_results, window_results))
@@ -1195,8 +1230,15 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let result =
-            calculate_msi_metrics(&filtered, 100, 3.5, 0.0, "sample1".to_string(), output_req);
+        let result = calculate_msi_metrics(
+            &filtered,
+            100,
+            3.5,
+            0.0,
+            "sample1".to_string(),
+            output_req,
+            0.05,
+        );
 
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
@@ -1219,8 +1261,15 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let result =
-            calculate_msi_metrics(&filtered, 100, 3.5, 0.5, "sample1".to_string(), output_req);
+        let result = calculate_msi_metrics(
+            &filtered,
+            100,
+            3.5,
+            0.5,
+            "sample1".to_string(),
+            output_req,
+            0.05,
+        );
         let lower = result.uncertainty_lower.unwrap();
         let upper = result.uncertainty_upper.unwrap();
         let std_dev: f64 = result.map_std_dev.unwrap();
@@ -1252,8 +1301,15 @@ mod tests {
         };
 
         // AF=0.0 should include distribution
-        let result_af0 =
-            calculate_msi_metrics(&filtered, 100, 3.5, 0.0, "sample1".to_string(), output_req);
+        let result_af0 = calculate_msi_metrics(
+            &filtered,
+            100,
+            3.5,
+            0.0,
+            "sample1".to_string(),
+            output_req,
+            0.00,
+        );
         assert!(result_af0.distribution.is_some());
         let dist = result_af0.distribution.unwrap();
         assert_eq!(dist.len(), 2);
@@ -1263,8 +1319,15 @@ mod tests {
         assert_eq!(dist[1].k, 1);
 
         // AF=0.5 should NOT include distribution
-        let result_af5 =
-            calculate_msi_metrics(&filtered, 100, 3.5, 0.5, "sample1".to_string(), output_req);
+        let result_af5 = calculate_msi_metrics(
+            &filtered,
+            100,
+            3.5,
+            0.5,
+            "sample1".to_string(),
+            output_req,
+            0.00,
+        );
         assert!(result_af5.distribution.is_none());
     }
 
@@ -1480,7 +1543,7 @@ mod tests {
             needs_distribution: false,
             needs_heatmap: false,
         };
-        let results = run_global_analysis(&regions, 100, "sample1", 3.5, &[0.0], output_req);
+        let results = run_global_analysis(&regions, 100, "sample1", 3.5, &[0.0], 0.05, output_req);
 
         assert_eq!(results.len(), 1);
         let r = &results["0.00"];
@@ -1502,20 +1565,21 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let (results, window_results) = run_af_evolution_analysis(
-            &regions,
-            100,
-            "sample1",
-            3.5,
-            &[0.0],
-            output_req,
-            Some(1),
-            1_000_000,
-            0.1,
-        )
-        .unwrap();
+        let config = AnalysisConfig {
+            total_regions: 100,
+            sample: "sample1",
+            msi_high_threshold: 3.5,
+            af_thresholds: &[0.0],
+            num_threads: Some(1),
+            window_size: 1_000_000,
+            distribution_af: 0.00,
+            windowed_af: 0.05,
+        };
 
-        assert!(window_results.is_none());
+        let (results, window_results) =
+            run_af_evolution_analysis(&regions, config, output_req).unwrap();
+
+        assert!(window_results.is_empty());
         let result = &results["0.00"];
 
         assert!(result.k_map.is_none());
@@ -1560,20 +1624,21 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let (results, window_results) = run_af_evolution_analysis(
-            &regions,
-            100,
-            "sample1",
-            3.5,
-            &[0.0, 0.5, 1.0],
-            output_req,
-            Some(1),
-            1_000_000,
-            0.1,
-        )
-        .unwrap();
+        let config = AnalysisConfig {
+            total_regions: 100,
+            sample: "sample1",
+            msi_high_threshold: 3.5,
+            af_thresholds: &[0.0, 0.5, 1.0],
+            num_threads: Some(1),
+            window_size: 1_000_000,
+            distribution_af: 0.05,
+            windowed_af: 0.05,
+        };
 
-        assert!(window_results.is_none());
+        let (results, window_results) =
+            run_af_evolution_analysis(&regions, config, output_req).unwrap();
+
+        assert!(window_results.is_empty());
         assert_eq!(results.len(), 3, "Should have 3 AF threshold results");
 
         // AF=1.0: no variants pass (0.9 < 1.0, 0.5 < 1.0)
@@ -1654,27 +1719,30 @@ mod tests {
                 true,
             ),
         ];
+
         let output_req = OutputRequirements {
             needs_pseudotime: false,
             needs_distribution: false,
             needs_heatmap: true,
         };
-        let (global_results, window_results) = run_af_evolution_analysis(
-            &regions,
-            100,
-            "sample1",
-            3.5,
-            &[0.0],
-            output_req,
-            Some(1),
-            1_000_000,
-            0.1,
-        )
-        .unwrap();
+
+        let config = AnalysisConfig {
+            total_regions: 100,
+            sample: "sample1",
+            msi_high_threshold: 3.5,
+            af_thresholds: &[0.0],
+            num_threads: Some(1),
+            window_size: 1_000_000,
+            distribution_af: 0.05,
+            windowed_af: 0.05,
+        };
+
+        let (global_results, window_results) =
+            run_af_evolution_analysis(&regions, config, output_req).unwrap();
 
         assert!(global_results.is_empty());
 
-        let windows = window_results.unwrap();
+        let windows = window_results;
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].chrom, "chr1");
         assert_eq!(windows[0].window_start, 0);

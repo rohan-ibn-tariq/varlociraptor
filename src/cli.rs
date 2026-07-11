@@ -1506,6 +1506,11 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     data_pseudotime,
                     data_heatmap,
                 } => {
+                    info!("==============================================");
+                    info!("MSI Calling");
+                    info!("==============================================");
+
+                    /* Set up calling configuration */
                     let mut config = msi_calling::MSIConfig {
                         calls,
                         threads,
@@ -1524,8 +1529,15 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                         data_pseudotime,
                         data_heatmap,
                     };
+
+                    /* Validate the configuration and set defaults*/
+                    info!("----------------------------------------------");
+                    info!("Step 0: Validating Files or CLI Arguments & Setting Defaults");
+                    info!("----------------------------------------------");
                     config.set_defaults()?;
                     config.validate()?;
+
+                    /* Dispatch calling */
                     calling::microsatellite_instability::call_msi(config)?;
                 }
             }
