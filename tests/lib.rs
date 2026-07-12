@@ -795,3 +795,62 @@ fn test_call_msi_distribution_basic() -> Result<()> {
 
     Ok(())
 }
+
+/* ====== 2. Pseudotime ====== */
+
+#[test]
+fn test_call_msi_pseudotime_basic() -> Result<()> {
+    let basedir = basedir("test_call_msi_pseudotime_basic");
+    let data = format!("{}/pseudo.tsv", basedir);
+    let plot = format!("{}/pseudo.vl.json", basedir);
+    cleanup_file(&data);
+    cleanup_file(&plot);
+
+    run_msi_call(&basedir, |c| {
+        c.data_pseudotime = Some(PathBuf::from(&data));
+        c.plot_pseudotime = Some(PathBuf::from(&plot));
+    })?;
+
+    /****** TSV Checks ************/
+    let content = fs::read_to_string(&data)?;
+    let rows: Vec<Vec<&str>> = content.lines().skip(1).map(|l| l.split('\t').collect()).collect();
+    assert_eq!(rows.len(), 9, "one row per AF threshold in the thresholds list");
+
+    // af=1.0: no variant (AF 0.9, 0.6, 0.3) passes -> empty DP -> k_map=0
+    let row_af_1_0 = rows.iter().find(|r| r[1] == "1.00").expect("af=1.0 row");
+    assert_eq!(row_af_1_0[3], "0", "k_map=0 when no regions pass the filter");
+    assert_eq!(row_af_1_0[2], "0.00");
+    assert_eq!(row_af_1_0[5], "MSS");
+
+    // af=0.8: only the AF=0.9 region passes -> single region, p_stable=0.4 -> k_map=1
+    let row_af_0_8 = rows.iter().find(|r| r[1] == "0.80").expect("af=0.8 row");
+    assert_eq!(row_af_0_8[3], "1", "single region with p_stable=0.4 -> k_map=1");
+    assert_eq!(row_af_0_8[2], "33.33");
+
+    // af=0.6: AF=0.9 and AF=0.6 regions pass -> p_stable=[0.4,0.45] -> DP favors k=1 (0.49 vs 0.18, 0.33)
+    let row_af_0_6 = rows.iter().find(|r| r[1] == "0.60").expect("af=0.6 row");
+    assert_eq!(row_af_0_6[3], "1", "two-region DP still favors k_map=1 here");
+    assert_eq!(row_af_0_6[2], "33.33");
+
+    // af=0.0: all three regions pass -> p_stable=[0.4,0.45,0.6] -> DP favors k=2 (0.394 vs 0.366/0.132/0.108)
+    let row_af_0_0 = rows.iter().find(|r| r[1] == "0.00").expect("af=0.0 row");
+    assert_eq!(row_af_0_0[3], "2", "three-region DP shifts the mode to k_map=2");
+    assert_eq!(row_af_0_0[2], "66.67");
+    assert_eq!(row_af_0_0[5], "MSI-High");
+
+    /****** Plot Checks ************/
+    let plot_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(&plot)?)?;
+    let data_values = plot_value["data"]["values"]
+        .as_array()
+        .expect("plot should have a data.values array");
+    assert_eq!(data_values.len(), 9, "one plot point per AF threshold");
+
+    let plot_af_0_0 = data_values
+        .iter()
+        .find(|v| (v["af_threshold"].as_f64().unwrap() - 0.0).abs() < EXACT_MATCH_EPSILON)
+        .expect("plot should have an af_threshold=0.0 point");
+    let plot_msi_score = plot_af_0_0["msi_score"].as_f64().expect("msi_score should be numeric");
+    assert!((plot_msi_score - 66.67).abs() < 0.01, "plot msi_score should match TSV at af=0.0");
+
+    Ok(())
+}
