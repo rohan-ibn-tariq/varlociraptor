@@ -683,3 +683,115 @@ fn test_preprocess_msi_propagates_info_fields() -> Result<()> {
     );
     Ok(())
 }
+
+//####################################################################################################################################################
+// Tests for Call: Microsatellite Instability
+//####################################################################################################################################################
+
+/// Allowed error when checking that several probabilities add up to 1.0.
+/// Adding many floats might accumulate small rounding errors, so this is looser
+/// than EXACT_MATCH_EPSILON below.
+const PROB_SUM_EPSILON: f64 = 1e-6;
+
+/// Allowed rounding error when comparing the same number as written to two
+/// different output files (e.g. the TSV and the JSON plot). This tolerance is
+/// small because it only needs to cover that rounding, not any real computation
+/// difference.
+const EXACT_MATCH_EPSILON: f64 = 1e-9;
+
+fn default_msi_call_config(basedir: &str) -> varlociraptor::MSIConfig {
+    varlociraptor::MSIConfig {
+        calls: PathBuf::from(format!("{}/calls.vcf", basedir)),
+        sample: "tumor".to_string(),
+        events: vec!["somatic".to_string()],
+        msi_threshold: 3.5,
+        af_thresholds: vec![1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.0],
+        distribution_af: 0.05,
+        windowed_af: 0.05,
+        sliding_window: 1_000_000,
+        threads: Some(1),
+        plot_distribution: None,
+        plot_pseudotime: None,
+        plot_heatmap: None,
+        data_distribution: None,
+        data_pseudotime: None,
+        data_heatmap: None,
+        is_phred: false,
+    }
+}
+
+fn run_msi_call(
+    basedir: &str,
+    configure: impl FnOnce(&mut varlociraptor::MSIConfig),
+) -> Result<()> {
+    let mut config = default_msi_call_config(&basedir);
+    configure(&mut config);
+    config.set_defaults()?;
+    config.validate()?;
+    varlociraptor::call_msi(config)
+}
+
+/* ====== 1. Distribution ====== */
+
+#[test]
+fn test_call_msi_distribution_basic() -> Result<()> {
+    let basedir = basedir("test_call_msi_distribution_basic");
+    let data = format!("{}/dist.tsv", basedir);
+    let plot = format!("{}/dist.vl.json", basedir);
+    cleanup_file(&data);
+    cleanup_file(&plot);
+
+    run_msi_call(&basedir, |c| {
+        c.data_distribution = Some(PathBuf::from(&data));
+        c.plot_distribution = Some(PathBuf::from(&plot));
+    })?;
+
+    /****** TSV Checks ************/
+    let content = fs::read_to_string(&data)?;
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 4, "header + k=0,1,2 rows for 2 regions");
+
+    let tsv_probs: Vec<f64> = lines[1..]
+        .iter()
+        .map(|l| l.split('\t').last().unwrap().parse::<f64>().unwrap())
+        .collect();
+    let tsv_sum: f64 = tsv_probs.iter().sum();
+    assert!(
+        (tsv_sum - 1.0).abs() < PROB_SUM_EPSILON,
+        "TSV distribution must sum to 1.0"
+    );
+
+    /****** Plot Checks ************/
+    let plot_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(&plot)?)?;
+    let data_values = plot_value["data"]["values"]
+        .as_array()
+        .expect("plot should have a data.values array");
+    assert_eq!(data_values.len(), 3, "one plot point per k=0,1,2");
+
+    let plot_probs: Vec<f64> = data_values
+        .iter()
+        .map(|v| {
+            v["probability"]
+                .as_f64()
+                .expect("probability should be numeric")
+        })
+        .collect();
+    let plot_sum: f64 = plot_probs.iter().sum();
+    assert!(
+        (plot_sum - 1.0).abs() < PROB_SUM_EPSILON,
+        "plot distribution must sum to 1.0"
+    );
+
+    /****** Cross-check: TSV and plot must agree exactly, for every k ************/
+    for k in 0..3 {
+        assert!(
+            (tsv_probs[k] - plot_probs[k]).abs() < EXACT_MATCH_EPSILON,
+            "TSV/plot mismatch at k={}: tsv={}, plot={}",
+            k,
+            tsv_probs[k],
+            plot_probs[k]
+        );
+    }
+
+    Ok(())
+}
