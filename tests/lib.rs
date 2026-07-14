@@ -854,3 +854,133 @@ fn test_call_msi_pseudotime_basic() -> Result<()> {
 
     Ok(())
 }
+
+/* ====== 3. Heatmap ====== */
+
+#[test]
+fn test_call_msi_heatmap_basic() -> Result<()> {
+    let basedir = basedir("test_call_msi_heatmap_basic");
+    let data = format!("{}/heatmap.tsv", basedir);
+    let plot = format!("{}/heatmap.vl.json", basedir);
+    cleanup_file(&data);
+    cleanup_file(&plot);
+
+    run_msi_call(&basedir, |c| {
+        c.data_heatmap = Some(PathBuf::from(&data));
+        c.plot_heatmap = Some(PathBuf::from(&plot));
+    })?;
+
+    // 5 regions, window_size=1,000,000:
+    //   chr1 window [0, 1M):        region at pos 100            -> 1 region
+    //   chr1 window [1M, 2M):       regions at 1,000,100 & 1,500,100 -> 2 regions
+    //   chr1 window [2M, 3M):       region at 2,000,100           -> 1 region
+    //   chr2 window [0, 1M):        region at pos 500             -> 1 region
+    // Total: 4 non-empty windows, 5 regions distributed across them.
+    let content = fs::read_to_string(&data)?;
+    let rows: Vec<Vec<&str>> = content.lines().skip(1).map(|l| l.split('\t').collect()).collect();
+    assert_eq!(rows.len(), 4, "3 chr1 windows + 1 chr2 window");
+
+    let region_sum: i32 = rows.iter().map(|r| r[6].parse::<i32>().unwrap()).sum();
+    assert_eq!(region_sum, 5, "every one of the 5 regions must land in exactly one window");
+
+    assert_eq!(rows.iter().filter(|r| r[1] == "chr1").count(), 3);
+    assert_eq!(rows.iter().filter(|r| r[1] == "chr2").count(), 1);
+
+    let dense_window = rows
+        .iter()
+        .find(|r| r[1] == "chr1" && r[2] == "1000000")
+        .expect("chr1 window starting at 1,000,000 should exist");
+    assert_eq!(dense_window[6], "2", "two regions (1,000,100 and 1,500,100) share this window");
+
+    let plot_content = fs::read_to_string(&plot)?;
+    let plot_value: serde_json::Value = serde_json::from_str(&plot_content)?;
+    let data_values = plot_value["data"]["values"]
+        .as_array()
+        .expect("plot should have a data.values array");
+    assert_eq!(data_values.len(), 4, "plot should have one point per window");
+    assert!(!plot_content.contains("No heatmap data"));
+
+    Ok(())
+}
+
+#[test]
+fn test_call_msi_heatmap_empty() -> Result<()> {
+    let basedir = basedir("test_call_msi_heatmap_empty");
+    let data = format!("{}/heatmap_empty.tsv", basedir);
+    let plot = format!("{}/heatmap_empty.vl.json", basedir);
+    cleanup_file(&data);
+    cleanup_file(&plot);
+
+    run_msi_call(&basedir, |c| {
+        c.data_heatmap = Some(PathBuf::from(&data));
+        c.plot_heatmap = Some(PathBuf::from(&plot));
+    })?;
+
+    assert_eq!(fs::read_to_string(&data)?.lines().count(), 1, "header only, no MS regions");
+
+    let plot_content = fs::read_to_string(&plot)?;
+    let _plot_value: serde_json::Value = serde_json::from_str(&plot_content)?;
+    assert!(plot_content.contains("No heatmap data"));
+
+    Ok(())
+}
+
+#[test]
+fn test_call_msi_all_outputs_together() -> Result<()> {
+    let basedir = basedir("test_call_msi_heatmap_basic");
+    let files = [
+        format!("{}/combo_dist.tsv", basedir),
+        format!("{}/combo_dist.vl.json", basedir),
+        format!("{}/combo_pseudo.tsv", basedir),
+        format!("{}/combo_pseudo.vl.json", basedir),
+        format!("{}/combo_heat.tsv", basedir),
+        format!("{}/combo_heat.vl.json", basedir),
+    ];
+    for f in &files {
+        cleanup_file(f);
+    }
+
+    run_msi_call(&basedir, |c| {
+        c.data_distribution = Some(PathBuf::from(&files[0]));
+        c.plot_distribution = Some(PathBuf::from(&files[1]));
+        c.data_pseudotime = Some(PathBuf::from(&files[2]));
+        c.plot_pseudotime = Some(PathBuf::from(&files[3]));
+        c.data_heatmap = Some(PathBuf::from(&files[4]));
+        c.plot_heatmap = Some(PathBuf::from(&files[5]));
+    })?;
+
+    for f in &files {
+        assert!(Path::new(f).exists(), "{} should exist", f);
+    }
+
+    // Distribution: all 5 regions pass at distribution_af=0.05 -> k=0..5 -> 6 rows + header
+    let dist_content = fs::read_to_string(&files[0])?;
+    let dist_lines: Vec<&str> = dist_content.lines().collect();
+    assert_eq!(dist_lines.len(), 7, "header + k=0..5 rows for 5 regions");
+    let dist_prob_sum: f64 = dist_lines[1..]
+        .iter()
+        .map(|l| l.split('\t').last().unwrap().parse::<f64>().unwrap())
+        .sum();
+    assert!((dist_prob_sum - 1.0).abs() < PROB_SUM_EPSILON);
+
+    // Pseudotime: one row per AF threshold in the 9-value list
+    let pseudo_content = fs::read_to_string(&files[2])?;
+    let pseudo_lines: Vec<&str> = pseudo_content.lines().collect();
+    assert_eq!(pseudo_lines.len(), 10, "header + 9 AF threshold rows");
+
+    // Heatmap: 4-window shape
+    let heat_content = fs::read_to_string(&files[4])?;
+    let heat_lines: Vec<&str> = heat_content.lines().collect();
+    assert_eq!(heat_lines.len(), 5, "header + 4 windows");
+
+    for plot_path in [&files[1], &files[3], &files[5]] {
+        let plot_content = fs::read_to_string(plot_path)?;
+        let plot_value: serde_json::Value = serde_json::from_str(&plot_content)?;
+        let values = plot_value["data"]["values"]
+            .as_array()
+            .expect("plot should have a data.values array");
+        assert!(!values.is_empty(), "{} should have non-empty plot data", plot_path);
+    }
+
+    Ok(())
+}
