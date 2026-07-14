@@ -984,3 +984,27 @@ fn test_call_msi_all_outputs_together() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_call_msi_dummy_and_real_mixed() -> Result<()> {
+    let basedir = basedir("test_call_msi_dummy_and_real_mixed");
+    let output = format!("{}/mixed_pseudo.tsv", basedir);
+    cleanup_file(&output);
+
+    run_msi_call(&basedir, |c| {
+        c.data_pseudotime = Some(PathBuf::from(&output));
+    })?;
+
+    // Real region PROB_SOMATIC=0.9 -> p_stable=0.1
+    // Dummy region PROB_SOMATIC=0.001 -> p_stable=0.999
+    // P(k=0)=0.1*0.999=0.0999, P(k=1)=0.9*0.999+0.1*0.001=0.8992 <-wins, P(k=2)=0.9*0.001=0.0009
+    // k_map=1, msi_score = 1/2 * 100 = 50.00
+    let content = fs::read_to_string(&output)?;
+    let row_af_0_0 = content.lines().find(|l| l.starts_with("tumor\t0.00")).unwrap();
+    let fields: Vec<&str> = row_af_0_0.split('\t').collect();
+
+    assert_eq!(fields[3], "1", "only the real indel region registers as unstable (k_map=1)");
+    assert_eq!(fields[2], "50.00", "msi_score = 1/2 * 100");
+
+    Ok(())
+}
