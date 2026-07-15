@@ -813,28 +813,48 @@ fn test_call_msi_pseudotime_basic() -> Result<()> {
 
     /****** TSV Checks ************/
     let content = fs::read_to_string(&data)?;
-    let rows: Vec<Vec<&str>> = content.lines().skip(1).map(|l| l.split('\t').collect()).collect();
-    assert_eq!(rows.len(), 9, "one row per AF threshold in the thresholds list");
+    let rows: Vec<Vec<&str>> = content
+        .lines()
+        .skip(1)
+        .map(|l| l.split('\t').collect())
+        .collect();
+    assert_eq!(
+        rows.len(),
+        9,
+        "one row per AF threshold in the thresholds list"
+    );
 
     // af=1.0: no variant (AF 0.9, 0.6, 0.3) passes -> empty DP -> k_map=0
     let row_af_1_0 = rows.iter().find(|r| r[1] == "1.00").expect("af=1.0 row");
-    assert_eq!(row_af_1_0[3], "0", "k_map=0 when no regions pass the filter");
+    assert_eq!(
+        row_af_1_0[3], "0",
+        "k_map=0 when no regions pass the filter"
+    );
     assert_eq!(row_af_1_0[2], "0.00");
     assert_eq!(row_af_1_0[5], "MSS");
 
     // af=0.8: only the AF=0.9 region passes -> single region, p_stable=0.4 -> k_map=1
     let row_af_0_8 = rows.iter().find(|r| r[1] == "0.80").expect("af=0.8 row");
-    assert_eq!(row_af_0_8[3], "1", "single region with p_stable=0.4 -> k_map=1");
+    assert_eq!(
+        row_af_0_8[3], "1",
+        "single region with p_stable=0.4 -> k_map=1"
+    );
     assert_eq!(row_af_0_8[2], "33.33");
 
     // af=0.6: AF=0.9 and AF=0.6 regions pass -> p_stable=[0.4,0.45] -> DP favors k=1 (0.49 vs 0.18, 0.33)
     let row_af_0_6 = rows.iter().find(|r| r[1] == "0.60").expect("af=0.6 row");
-    assert_eq!(row_af_0_6[3], "1", "two-region DP still favors k_map=1 here");
+    assert_eq!(
+        row_af_0_6[3], "1",
+        "two-region DP still favors k_map=1 here"
+    );
     assert_eq!(row_af_0_6[2], "33.33");
 
     // af=0.0: all three regions pass -> p_stable=[0.4,0.45,0.6] -> DP favors k=2 (0.394 vs 0.366/0.132/0.108)
     let row_af_0_0 = rows.iter().find(|r| r[1] == "0.00").expect("af=0.0 row");
-    assert_eq!(row_af_0_0[3], "2", "three-region DP shifts the mode to k_map=2");
+    assert_eq!(
+        row_af_0_0[3], "2",
+        "three-region DP shifts the mode to k_map=2"
+    );
     assert_eq!(row_af_0_0[2], "66.67");
     assert_eq!(row_af_0_0[5], "MSI-High");
 
@@ -849,8 +869,13 @@ fn test_call_msi_pseudotime_basic() -> Result<()> {
         .iter()
         .find(|v| (v["af_threshold"].as_f64().unwrap() - 0.0).abs() < EXACT_MATCH_EPSILON)
         .expect("plot should have an af_threshold=0.0 point");
-    let plot_msi_score = plot_af_0_0["msi_score"].as_f64().expect("msi_score should be numeric");
-    assert!((plot_msi_score - 66.67).abs() < 0.01, "plot msi_score should match TSV at af=0.0");
+    let plot_msi_score = plot_af_0_0["msi_score"]
+        .as_f64()
+        .expect("msi_score should be numeric");
+    assert!(
+        (plot_msi_score - 66.67).abs() < 0.01,
+        "plot msi_score should match TSV at af=0.0"
+    );
 
     Ok(())
 }
@@ -877,11 +902,18 @@ fn test_call_msi_heatmap_basic() -> Result<()> {
     //   chr2 window [0, 1M):        region at pos 500             -> 1 region
     // Total: 4 non-empty windows, 5 regions distributed across them.
     let content = fs::read_to_string(&data)?;
-    let rows: Vec<Vec<&str>> = content.lines().skip(1).map(|l| l.split('\t').collect()).collect();
+    let rows: Vec<Vec<&str>> = content
+        .lines()
+        .skip(1)
+        .map(|l| l.split('\t').collect())
+        .collect();
     assert_eq!(rows.len(), 4, "3 chr1 windows + 1 chr2 window");
 
     let region_sum: i32 = rows.iter().map(|r| r[6].parse::<i32>().unwrap()).sum();
-    assert_eq!(region_sum, 5, "every one of the 5 regions must land in exactly one window");
+    assert_eq!(
+        region_sum, 5,
+        "every one of the 5 regions must land in exactly one window"
+    );
 
     assert_eq!(rows.iter().filter(|r| r[1] == "chr1").count(), 3);
     assert_eq!(rows.iter().filter(|r| r[1] == "chr2").count(), 1);
@@ -890,14 +922,21 @@ fn test_call_msi_heatmap_basic() -> Result<()> {
         .iter()
         .find(|r| r[1] == "chr1" && r[2] == "1000000")
         .expect("chr1 window starting at 1,000,000 should exist");
-    assert_eq!(dense_window[6], "2", "two regions (1,000,100 and 1,500,100) share this window");
+    assert_eq!(
+        dense_window[6], "2",
+        "two regions (1,000,100 and 1,500,100) share this window"
+    );
 
     let plot_content = fs::read_to_string(&plot)?;
     let plot_value: serde_json::Value = serde_json::from_str(&plot_content)?;
     let data_values = plot_value["data"]["values"]
         .as_array()
         .expect("plot should have a data.values array");
-    assert_eq!(data_values.len(), 4, "plot should have one point per window");
+    assert_eq!(
+        data_values.len(),
+        4,
+        "plot should have one point per window"
+    );
     assert!(!plot_content.contains("No heatmap data"));
 
     Ok(())
@@ -916,7 +955,11 @@ fn test_call_msi_heatmap_empty() -> Result<()> {
         c.plot_heatmap = Some(PathBuf::from(&plot));
     })?;
 
-    assert_eq!(fs::read_to_string(&data)?.lines().count(), 1, "header only, no MS regions");
+    assert_eq!(
+        fs::read_to_string(&data)?.lines().count(),
+        1,
+        "header only, no MS regions"
+    );
 
     let plot_content = fs::read_to_string(&plot)?;
     let _plot_value: serde_json::Value = serde_json::from_str(&plot_content)?;
@@ -979,7 +1022,11 @@ fn test_call_msi_all_outputs_together() -> Result<()> {
         let values = plot_value["data"]["values"]
             .as_array()
             .expect("plot should have a data.values array");
-        assert!(!values.is_empty(), "{} should have non-empty plot data", plot_path);
+        assert!(
+            !values.is_empty(),
+            "{} should have non-empty plot data",
+            plot_path
+        );
     }
 
     Ok(())
@@ -1000,11 +1047,65 @@ fn test_call_msi_dummy_and_real_mixed() -> Result<()> {
     // P(k=0)=0.1*0.999=0.0999, P(k=1)=0.9*0.999+0.1*0.001=0.8992 <-wins, P(k=2)=0.9*0.001=0.0009
     // k_map=1, msi_score = 1/2 * 100 = 50.00
     let content = fs::read_to_string(&output)?;
-    let row_af_0_0 = content.lines().find(|l| l.starts_with("tumor\t0.00")).unwrap();
+    let row_af_0_0 = content
+        .lines()
+        .find(|l| l.starts_with("tumor\t0.00"))
+        .unwrap();
     let fields: Vec<&str> = row_af_0_0.split('\t').collect();
 
-    assert_eq!(fields[3], "1", "only the real indel region registers as unstable (k_map=1)");
+    assert_eq!(
+        fields[3], "1",
+        "only the real indel region registers as unstable (k_map=1)"
+    );
     assert_eq!(fields[2], "50.00", "msi_score = 1/2 * 100");
+
+    Ok(())
+}
+
+#[test]
+fn test_call_msi_multi_sample_picks_correct_column() -> Result<()> {
+    let basedir = basedir("test_call_msi_multi_sample");
+    let tumor_out = format!("{}/tumor_pseudo.tsv", basedir);
+    let normal_out = format!("{}/normal_pseudo.tsv", basedir);
+    cleanup_file(&tumor_out);
+    cleanup_file(&normal_out);
+
+    run_msi_call(&basedir, |c| {
+        c.sample = "tumor".to_string();
+        c.data_pseudotime = Some(PathBuf::from(&tumor_out));
+    })?;
+
+    run_msi_call(&basedir, |c| {
+        c.sample = "normal".to_string();
+        c.data_pseudotime = Some(PathBuf::from(&normal_out));
+    })?;
+
+    // Single region, PROB_SOMATIC=0.9 -> p_stable=0.1
+    // Tumor AF=0.8 >= 0.6: region passes -> P(k=0)=0.1, P(k=1)=0.9 -> k_map=1 -> msi_score=100.00
+    let tumor_content = fs::read_to_string(&tumor_out)?;
+    let tumor_row_0_6 = tumor_content
+        .lines()
+        .find(|l| l.starts_with("tumor\t0.60"))
+        .expect("tumor row at af=0.6");
+    let tumor_fields: Vec<&str> = tumor_row_0_6.split('\t').collect();
+    assert_eq!(
+        tumor_fields[3], "1",
+        "tumor AF=0.8 passes 0.6 threshold -> k_map=1"
+    );
+    assert_eq!(tumor_fields[2], "100.00");
+
+    // Normal AF=0.0 < 0.6: region excluded -> DP over zero regions -> k_map=0 -> msi_score=0.00
+    let normal_content = fs::read_to_string(&normal_out)?;
+    let normal_row_0_6 = normal_content
+        .lines()
+        .find(|l| l.starts_with("normal\t0.60"))
+        .expect("normal row at af=0.6");
+    let normal_fields: Vec<&str> = normal_row_0_6.split('\t').collect();
+    assert_eq!(
+        normal_fields[3], "0",
+        "normal AF=0.0 fails 0.6 threshold -> k_map=0"
+    );
+    assert_eq!(normal_fields[2], "0.00");
 
     Ok(())
 }
