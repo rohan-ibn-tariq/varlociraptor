@@ -1109,3 +1109,33 @@ fn test_call_msi_multi_sample_picks_correct_column() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_call_msi_multi_event_combination() -> Result<()> {
+    let basedir = basedir("test_call_msi_multi_event");
+    let output = format!("{}/multi_event_dist.tsv", basedir);
+    cleanup_file(&output);
+
+    // PROB_SOMATIC=0.3, PROB_HIGH_VAF=0.4 -> ln_sum_exp -> combined P(event) ~= 0.7
+    // -> prob_absent ~= 0.3 -> p_stable = 0.3
+    // Single region: P(k=0)=0.3, P(k=1)=0.7 -> sums to 1.0
+    run_msi_call(&basedir, |c| {
+        c.events = vec!["somatic".to_string(), "high_vaf".to_string()];
+        c.data_distribution = Some(PathBuf::from(&output));
+    })?;
+
+    let content = fs::read_to_string(&output)?;
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 3, "header + k=0,1 rows for single region");
+
+    let prob_sum: f64 = lines[1..]
+        .iter()
+        .map(|l| l.split('\t').last().unwrap().parse::<f64>().unwrap())
+        .sum();
+    assert!(
+        (prob_sum - 1.0).abs() < PROB_SUM_EPSILON,
+        "combined-event distribution must still sum to 1.0"
+    );
+
+    Ok(())
+}
