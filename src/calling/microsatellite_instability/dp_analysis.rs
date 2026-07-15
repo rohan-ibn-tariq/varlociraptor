@@ -323,7 +323,7 @@ fn setup_thread_pool(num_threads: Option<usize>) {
 
 /* === FILTERING REGIONS VARIANTS BY AF============ */
 
-/// Filter regions by AF threshold for a specific sample
+/// Filter a sample's regions down to variants meeting a minimum allele frequency.
 ///
 /// Creates a flat filtered view avoiding Vec-per-region allocation overhead.
 /// Optimized for MSI analysis where most regions have ~ 1-3 variants.
@@ -1104,6 +1104,22 @@ mod tests {
         assert_eq!(filtered.len(), 2); // Only first and third
         assert!(filtered.get_region(0)[0].af - 0.8 < TEST_EPSILON);
         assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_filter_by_af_boundary_exact_threshold() {
+        // af == threshold is kept: >= is inclusive, not strict >
+        let regions = vec![make_region_simple(vec![make_variant(0.01, 0.6)])];
+        let filtered = filter_regions_by_af(&regions, 0.6);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered.get_region(0).len(), 1);
+    }
+
+    #[test]
+    fn test_filter_by_af_empty_regions_input() {
+        let regions: Vec<RegionSummary> = vec![];
+        let filtered = filter_regions_by_af(&regions, 0.5);
+        assert_eq!(filtered.len(), 0);
     }
 
     /* ============ DP Primitives ==================== */
