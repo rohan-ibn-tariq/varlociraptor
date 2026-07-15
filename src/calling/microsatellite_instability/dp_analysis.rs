@@ -172,7 +172,7 @@ pub(super) struct AnalysisConfig<'a> {
     /// Threshold (percentage) at or above which a sample is classified MSI-High.
     pub msi_high_threshold: f64,
     /// Allele frequency thresholds to compute pseudotime/distribution analysis data.
-    pub af_thresholds: &'a [f64],
+    pub af_thresholds: Vec<f64>,
     /// Thread count for the rayon pool (`None` = rayon default).
     pub num_threads: Option<usize>,
     /// Sliding window width (bp) for heatmap analysis.
@@ -848,7 +848,7 @@ pub(super) fn run_af_evolution_analysis(
             config.total_regions,
             config.sample,
             config.msi_high_threshold,
-            config.af_thresholds,
+            &config.af_thresholds,
             config.distribution_af,
             output_req,
         )
@@ -1585,7 +1585,7 @@ mod tests {
             total_regions: 100,
             sample: "sample1",
             msi_high_threshold: 3.5,
-            af_thresholds: &[0.0],
+            af_thresholds: vec![0.0],
             num_threads: Some(1),
             window_size: 1_000_000,
             distribution_af: 0.00,
@@ -1644,7 +1644,7 @@ mod tests {
             total_regions: 100,
             sample: "sample1",
             msi_high_threshold: 3.5,
-            af_thresholds: &[0.0, 0.5, 1.0],
+            af_thresholds: vec![0.0, 0.5, 1.0],
             num_threads: Some(1),
             window_size: 1_000_000,
             distribution_af: 0.05,
@@ -1746,7 +1746,7 @@ mod tests {
             total_regions: 100,
             sample: "sample1",
             msi_high_threshold: 3.5,
-            af_thresholds: &[0.0],
+            af_thresholds: vec![0.0],
             num_threads: Some(1),
             window_size: 1_000_000,
             distribution_af: 0.05,

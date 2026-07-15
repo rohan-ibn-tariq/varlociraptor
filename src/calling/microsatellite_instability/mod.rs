@@ -207,11 +207,19 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
             needs_heatmap: config.plot_heatmap.is_some() || config.data_heatmap.is_some(),
         };
 
+        let af_thresholds: Vec<f64> = if output_req.needs_pseudotime {
+            config.af_thresholds.clone()
+        } else if output_req.needs_distribution {
+            vec![config.distribution_af]
+        } else {
+            vec![]
+        };
+
         let analysis_config = AnalysisConfig {
             total_regions: stats.total_ms_regions,
             sample: &config.sample,
             msi_high_threshold: config.msi_threshold,
-            af_thresholds: &config.af_thresholds,
+            af_thresholds: af_thresholds,
             num_threads: config.threads,
             window_size: config.sliding_window,
             distribution_af: config.distribution_af,
