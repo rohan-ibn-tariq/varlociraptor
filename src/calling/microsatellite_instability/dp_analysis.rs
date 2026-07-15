@@ -800,6 +800,14 @@ fn run_global_analysis(
 ///                  windowed heatmap window size and compute resource
 /// * `output_req` - Which outputs requested (controls computation)
 ///
+/// # Note
+/// This function does not trim `config.af_thresholds` itself - it computes
+/// the DP for exactly whatever thresholds are present. The caller
+/// (`call_msi` in `mod.rs`) is responsible for pre-trimming the list to
+/// avoid wasted computation: the full list when pseudotime is requested,
+/// a single-element `[distribution_af]` when only distribution is
+/// requested, or empty when neither is needed.
+///
 /// # Returns
 /// Tuple of `(global_results, window_results)` where:
 /// - `global_results`: HashMap keyed by AF threshold string -> MSI result.
@@ -1765,5 +1773,33 @@ mod tests {
         assert_eq!(windows[0].regions_in_window, 2);
         assert!((windows[0].msi_score - 100.0).abs() < TEST_EPSILON);
         assert!((windows[0].posterior_probability - 0.72).abs() < TEST_EPSILON);
+    }
+
+    #[test]
+    fn test_run_af_evolution_analysis_nothing_requested() {
+        let regions = vec![make_region_simple(vec![make_variant(0.1, 0.5)])];
+
+        let output_req = OutputRequirements {
+            needs_pseudotime: false,
+            needs_distribution: false,
+            needs_heatmap: false,
+        };
+
+        let config = AnalysisConfig {
+            total_regions: 100,
+            sample: "sample1",
+            msi_high_threshold: 3.5,
+            af_thresholds: vec![0.0],
+            num_threads: Some(1),
+            window_size: 1_000_000,
+            distribution_af: 0.05,
+            windowed_af: 0.05,
+        };
+
+        let (global_results, window_results) =
+            run_af_evolution_analysis(&regions, config, output_req).unwrap();
+
+        assert!(global_results.is_empty());
+        assert!(window_results.is_empty());
     }
 }
