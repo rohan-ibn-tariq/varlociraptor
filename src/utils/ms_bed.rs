@@ -52,6 +52,16 @@ impl BedRegion {
     /*  NOTE: flexible is_valid_motif can be implemented if later need
         for MS regions to be greater than length 6.
     */
+
+    /// Computes the fixed genomic position of a synthesized dummy indel
+    /// for this region: the last base of the region's first repeat span.
+    ///
+    /// # Example
+    /// region { start: 100, motif: "CAG" } -> 100 + 3 - 1 = 102
+    pub(crate) fn dummy_indel_position(&self) -> u64 {
+        self.start + self.motif.len() as u64 - 1
+    }
+
 }
 
 /// Parse motif from BED name field.
@@ -260,6 +270,7 @@ mod tests {
         assert_eq!(region.region_id(), "chr1:100-200");
         assert_eq!(region.motif_length(), 3);
         assert!(region.is_valid_motif());
+        assert_eq!(region.dummy_indel_position(), 102);
     }
 
     #[test]
