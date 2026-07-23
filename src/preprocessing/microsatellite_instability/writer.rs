@@ -93,7 +93,7 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
         .into());
     }
 
-    let deletion_pos = region.start + (motif_bytes.len() as u64) - 1;
+    let deletion_pos = region.dummy_indel_position();
     record.set_pos(deletion_pos as i64);
 
     let anchor = vec![motif_bytes[motif_bytes.len() - 1]];
