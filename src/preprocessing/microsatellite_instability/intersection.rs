@@ -66,6 +66,49 @@ impl PreprocessingStats {
     }
 }
 
+/// An item currently held in the streaming window - either a variant
+/// read from the input VCF, or a synthesized dummy indel.
+enum WindowEntry {
+    /// A variant read from the input VCF.
+    Real(VariantInWindow),
+    /// A synthesized deletion representing an MS region with no
+    /// observed perfect indel.
+    Dummy(BedRegion),
+}
+
+impl WindowEntry {
+    /// Position used for ordering comparisons.
+    fn pos(&self) -> u64 {
+        match self {
+            WindowEntry::Real(v) => v.record.pos() as u64,
+            WindowEntry::Dummy(region) => region.dummy_indel_position(),
+        }
+    }
+
+    /// Chromosome this entry belongs to.
+    fn chrom(&self) -> &str {
+        match self {
+            WindowEntry::Real(v) => &v.chrom,
+            WindowEntry::Dummy(region) => &region.chrom,
+        }
+    }
+
+    /// Position used to decide if this entry is safe to flush.
+    fn max_safe_pos(&self) -> Option<u64> {
+        match self {
+            WindowEntry::Real(v) => {
+                let pos = v.record.pos() as u64;
+                let alleles = v.record.alleles();
+                let ref_allele = alleles[0];
+                (1..alleles.len())
+                    .filter_map(|i| calculate_indel_position(pos, ref_allele, alleles[i]))
+                    .max()
+            }
+            WindowEntry::Dummy(_) => None,
+        }
+    }
+}
+
 /* ============ Functions =========================== */
 
 /// Check if a variant's indel overlaps with a BED region.
@@ -141,11 +184,11 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// 1. Stream through BED regions sequentially (bounded memory usage)
 /// 2. Maintain sliding window of VCF variants around current region
 /// 3. For each BED region:
-///    - Remove and write variants before region (past window boundary)
+///    - Flush window entries (real or dummy), that are safe to write
 ///    - Load variants until past region end
 ///    - Check each variant for perfect repeat status (via variant_analysis::should_include_variant)
 ///    - Accumulate REGION_ID annotations for overlapping perfect MS indels
-///    - Inject dummy deletion if no perfect indel found (via writer::inject_dummy_deletion)
+///    - Insert dummy indel into the window (at its correct sorted position) if no perfect indel found
 /// 4. Write all remaining variants after BED exhausted
 ///
 /// # Output Behavior
@@ -192,7 +235,7 @@ pub(super) fn process_and_annotate(
     let mut skipped_invalid_regions = 0;
     let mut total_annotated_indels = 0;
     let mut total_dummy_indels = 0;
-    let mut variant_window: VecDeque<VariantInWindow> = VecDeque::new();
+    let mut variant_window: VecDeque<WindowEntry> = VecDeque::new();
     let mut seen_any_chrom_overlap = false;
 
     /* ========== Main Loop: Process each BED region ========== */
@@ -216,58 +259,31 @@ pub(super) fn process_and_annotate(
         }
 
         /* ===== STEP 1: Remove and write variants before this region ===== */
-        while let Some(variant_info) = variant_window.front() {
-            if variant_info.chrom < region.chrom {
-                let variant_info = variant_window.pop_front().unwrap();
-                write_variant(&mut writer, variant_info, &mut total_annotated_indels)?;
-            } else if variant_info.chrom == region.chrom {
-                let pos = variant_info.record.pos() as u64;
-                let alleles = variant_info.record.alleles();
-                let ref_allele = alleles[0];
-
-                let max_indel_pos = (1..alleles.len())
-                    .filter_map(|alt_idx| {
-                        let alt_allele = alleles[alt_idx];
-                        calculate_indel_position(pos, ref_allele, alt_allele)
-                    })
-                    .max()
-                    .unwrap_or(pos);
-
-                if max_indel_pos < region.start {
-                    let variant_info = variant_window.pop_front().unwrap();
-                    write_variant(&mut writer, variant_info, &mut total_annotated_indels)?;
-                } else {
-                    break;
+        while let Some(entry) = variant_window.front() {
+            let ready = match entry {
+                WindowEntry::Dummy(..) => true,
+                WindowEntry::Real(_) if entry.chrom() < region.chrom.as_str() => true,
+                WindowEntry::Real(_) if entry.chrom() == region.chrom.as_str() => {
+                    entry.max_safe_pos().map_or(true, |position| position < region.start)
                 }
-            } else {
+                _ => false,
+            };
+            if !ready {
                 break;
+            }
+            match variant_window.pop_front().unwrap() {
+                WindowEntry::Real(variant) => write_variant(&mut writer, variant, &mut total_annotated_indels)?,
+                WindowEntry::Dummy(region) => inject_dummy_deletion(&mut writer, &region)?,
             }
         }
 
         /* ===== STEP 2: Load variants until we pass region ===== */
         loop {
-            if let Some(variant_info) = variant_window.back() {
-                if variant_info.chrom > region.chrom {
+            if let Some(entry) = variant_window.back() {
+                if entry.chrom() > region.chrom.as_str()
+                    || (entry.chrom() == region.chrom.as_str() && entry.pos() > region.end)
+                {
                     break;
-                } else if variant_info.chrom == region.chrom {
-                    let pos = variant_info.record.pos() as u64;
-                    let alleles = variant_info.record.alleles();
-                    let ref_allele = alleles[0];
-
-                    let min_indel_pos = (1..alleles.len())
-                        .filter_map(|alt_idx| {
-                            let alt_allele = alleles[alt_idx];
-                            calculate_indel_position(pos, ref_allele, alt_allele)
-                        })
-                        .min()
-                        .unwrap_or(pos);
-
-                    // NOTE: Use > not >= to allow insertions at exactly region.end
-                    // (inclusive end boundary for insertions, BED end is exclusive
-                    // so region.end is a valid insertion attachment point)
-                    if min_indel_pos > region.end {
-                        break;
-                    }
                 }
             }
 
@@ -294,12 +310,12 @@ pub(super) fn process_and_annotate(
                     }
 
                     let aux_info = aux_info_collector.collect(&next_record)?;
-                    variant_window.push_back(VariantInWindow {
+                    variant_window.push_back(WindowEntry::Real(VariantInWindow {
                         record: next_record,
                         chrom,
                         matching_regions: HashMap::new(),
                         aux_info,
-                    });
+                    }));
                 }
             }
         }
@@ -307,7 +323,12 @@ pub(super) fn process_and_annotate(
         /* ===== STEP 3: Accumulate region IDs for overlapping variants ===== */
         let mut found_perfect_indel_in_region = false;
 
-        for variant_info in &mut variant_window {
+        for entry in &mut variant_window {
+            let variant_info = match entry {
+                WindowEntry::Real(variant) => variant,
+                WindowEntry::Dummy(_) => continue,
+            };
+
             if variant_info.chrom != region.chrom {
                 continue;
             }
@@ -336,21 +357,32 @@ pub(super) fn process_and_annotate(
                     variant_info.matching_regions.insert(alt_idx, region_id);
 
                     found_perfect_indel_in_region = true;
-                    break;
+
                 }
             }
         }
 
         /* ===== Inject dummy indel if no perfect indel found ===== */
         if !found_perfect_indel_in_region {
-            inject_dummy_deletion(&mut writer, &region)?;
+            let dummy_pos = region.dummy_indel_position();
+            let insert_at = variant_window
+                .iter()
+                .position(|e| {
+                    e.chrom() > region.chrom.as_str()
+                        || (e.chrom() == region.chrom.as_str() && e.pos() > dummy_pos)
+                })
+                .unwrap_or(variant_window.len());
+            variant_window.insert(insert_at, WindowEntry::Dummy(region.clone()));
             total_dummy_indels += 1;
         }
     }
 
     /* ========== Write remaining variants in window ========== */
-    while let Some(variant_info) = variant_window.pop_front() {
-        write_variant(&mut writer, variant_info, &mut total_annotated_indels)?;
+    while let Some(entry) = variant_window.pop_front() {
+        match entry {
+            WindowEntry::Real(variant) => write_variant(&mut writer, variant, &mut total_annotated_indels)?,
+            WindowEntry::Dummy(region) => inject_dummy_deletion(&mut writer, &region)?,
+        }
     }
 
     /* ========== Finalization ========== */
