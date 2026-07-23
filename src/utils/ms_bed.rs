@@ -61,7 +61,6 @@ impl BedRegion {
     pub(crate) fn dummy_indel_position(&self) -> u64 {
         self.start + self.motif.len() as u64 - 1
     }
-
 }
 
 /// Parse motif from BED name field.

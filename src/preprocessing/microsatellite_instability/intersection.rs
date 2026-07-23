@@ -263,16 +263,18 @@ pub(super) fn process_and_annotate(
             let ready = match entry {
                 WindowEntry::Dummy(..) => true,
                 WindowEntry::Real(_) if entry.chrom() < region.chrom.as_str() => true,
-                WindowEntry::Real(_) if entry.chrom() == region.chrom.as_str() => {
-                    entry.max_safe_pos().map_or(true, |position| position < region.start)
-                }
+                WindowEntry::Real(_) if entry.chrom() == region.chrom.as_str() => entry
+                    .max_safe_pos()
+                    .map_or(true, |position| position < region.start),
                 _ => false,
             };
             if !ready {
                 break;
             }
             match variant_window.pop_front().unwrap() {
-                WindowEntry::Real(variant) => write_variant(&mut writer, variant, &mut total_annotated_indels)?,
+                WindowEntry::Real(variant) => {
+                    write_variant(&mut writer, variant, &mut total_annotated_indels)?
+                }
                 WindowEntry::Dummy(region) => inject_dummy_deletion(&mut writer, &region)?,
             }
         }
@@ -357,7 +359,6 @@ pub(super) fn process_and_annotate(
                     variant_info.matching_regions.insert(alt_idx, region_id);
 
                     found_perfect_indel_in_region = true;
-
                 }
             }
         }
@@ -380,7 +381,9 @@ pub(super) fn process_and_annotate(
     /* ========== Write remaining variants in window ========== */
     while let Some(entry) = variant_window.pop_front() {
         match entry {
-            WindowEntry::Real(variant) => write_variant(&mut writer, variant, &mut total_annotated_indels)?,
+            WindowEntry::Real(variant) => {
+                write_variant(&mut writer, variant, &mut total_annotated_indels)?
+            }
             WindowEntry::Dummy(region) => inject_dummy_deletion(&mut writer, &region)?,
         }
     }
