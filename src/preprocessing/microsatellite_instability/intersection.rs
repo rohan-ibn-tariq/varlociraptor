@@ -412,6 +412,7 @@ mod tests {
 
     use crate::preprocessing::microsatellite_instability::header::prepare_header;
     use crate::utils::aux_info::tests::make_aux_collector;
+    use crate::utils::bcf_utils::get_info_strings;
     use crate::utils::bcf_utils::tests::{
         create_minimal_vcf, create_test_vcf, read_first_record_simple, TestVcfConfig,
     };
@@ -430,11 +431,10 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"T",
-            alt_alleles: vec![b"TT"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"T", &[b"TT"])],
+        );
 
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
@@ -481,11 +481,10 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region_multiple_anchors() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"TGCCT",
-            alt_alleles: vec![b"TG"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"TGCCT", &[b"TG"])],
+        );
 
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
@@ -520,11 +519,10 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region_complex_variant_tails_non_empty() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"ATT",
-            alt_alleles: vec![b"AG"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ATT", &[b"AG"])],
+        );
 
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
@@ -543,11 +541,10 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region_snv() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"T"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"A", &[b"T"])],
+        );
 
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
@@ -566,11 +563,10 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region_multi_alt() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"GCCT",
-            alt_alleles: vec![b"G", b"GCCTCCT"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"GCCT", &[b"G", b"GCCTCCT"])],
+        );
 
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
@@ -607,11 +603,10 @@ mod tests {
 
     #[test]
     fn test_variant_overlaps_region_insertion_at_end_boundary() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"T",
-            alt_alleles: vec![b"TT"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"T", &[b"TT"])],
+        );
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // Insertion at exactly region.end=100:  INCLUDED (inclusive)
@@ -648,11 +643,10 @@ mod tests {
     #[test]
     fn test_variant_overlaps_region_deletion_at_end_boundary() {
         // REF=TT, ALT=T: anchor=T(1 base), indel_pos = 99+1 = 100
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"TT",
-            alt_alleles: vec![b"T"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"TT", &[b"T"])],
+        );
         let (_reader, record) = read_first_record_simple(tmp_vcf.path());
 
         // Deletion at exactly region.end=100: EXCLUDED (exclusive)
@@ -710,6 +704,7 @@ mod tests {
 
         let stats =
             process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
 
         assert_eq!(stats.annotated_indels, 1);
         assert_eq!(stats.dummy_indels, 0);
@@ -739,6 +734,7 @@ mod tests {
 
         let stats =
             process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
 
         assert_eq!(stats.annotated_indels, 0);
         assert_eq!(stats.dummy_indels, 1);
@@ -771,6 +767,7 @@ mod tests {
 
         let stats =
             process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
 
         assert_eq!(stats.total_regions, 2);
         assert_eq!(stats.valid_regions, 1);
@@ -799,6 +796,7 @@ mod tests {
 
         let stats =
             process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
 
         assert_eq!(stats.annotated_indels, 0);
         assert_eq!(stats.dummy_indels, 1);
@@ -831,6 +829,7 @@ mod tests {
             bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
         let result = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux);
+        drop(writer);
 
         assert!(result.is_err());
         assert!(result
@@ -879,22 +878,169 @@ mod tests {
             &[br"##contig=<ID=chr1,length=10000>"],
             &[
                 (0, 990, b"A", &[b"AT"]),
-                (0, 1001, b"ACAGCAGCAG", &[b"ACAGCAGCAGCAG"]),
-                (0, 1002, b"ACAG", &[b"ACAGCAG"]),
+                (0, 999, b"ACAGCAGCAG", &[b"ACAGCAGCAGCAG"]),
+                (0, 1002, b"GCAG", &[b"GCAGCAG"]),
             ],
         );
         let aux = make_aux_collector(tmp_vcf.path(), &[]);
-        let tmp_bed = create_bed_file(&[("chr1", 1002, 1011, "1xCAG")]);
+        let tmp_bed = create_bed_file(&[("chr1", 1000, 1021, "7xCAG")]);
         let tmp_output = NamedTempFile::new().unwrap();
 
         let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
-        let out_header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
-        let mut out_writer =
-            bcf::Writer::from_path(tmp_output.path(), &out_header, true, bcf::Format::Vcf).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
 
         let stats =
-            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut out_writer, &aux).unwrap();
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
 
         assert_eq!(stats.annotated_indels, 2);
+    }
+
+    #[test]
+    fn test_process_and_annotate_output_stays_position_sorted() {
+        let tmp_vcf = create_minimal_vcf(
+            &[
+                br"##contig=<ID=chr1,length=10000>",
+                br"##contig=<ID=chr2,length=10000>",
+            ],
+            &[
+                (0, 99, b"ACAG", &[b"ACAGCAG"]), // matches region A
+                (0, 200, b"A", &[b"T"]),         // SNV near region B
+                (0, 299, b"ACAGCAGCAGCAG", &[b"ACAGCAGCAGCAGCAG", b"T"]), // alt0 matches region C, alt1 doesn't
+                (0, 302, b"GCAG", &[b"ACAGCAGCAGCAGCAG", b"T"]), // alt0 matches region C, alt1 doesn't
+                (0, 349, b"A", &[b"T"]),                         // SNV between C and D
+                (0, 399, b"ACAG", &[b"ACAGCAG"]),                // matches region D
+                (1, 199, b"ACAG", &[b"ACAGCAT"]),                // Doesn't match F, not perfect
+                (1, 499, b"ACAG", &[b"ACAGCAG"]),                // matches region G
+            ],
+        );
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+        let tmp_bed = create_bed_file(&[
+            ("chr1", 100, 121, "7xCAG"), // A: matched
+            ("chr1", 200, 221, "7xCAG"), // B: unmatched -> dummy
+            ("chr1", 300, 321, "7xCAG"), // C: matched via alt0 only
+            ("chr1", 400, 421, "7xCAG"), // D: matched
+            ("chr1", 500, 521, "7xCAG"), // E: unmatched -> dummy
+            ("chr2", 200, 221, "7xCAG"), // F: unmatched -> dummy
+            ("chr2", 500, 521, "7xCAG"), // G: matched
+        ]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
+
+        assert_eq!(stats.annotated_indels, 4);
+        assert_eq!(stats.dummy_indels, 3);
+
+        let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
+        let entries: Vec<(u32, i64)> = reader
+            .records()
+            .map(|r| {
+                let rec = r.unwrap();
+                (rec.rid().unwrap(), rec.pos())
+            })
+            .collect();
+        assert_eq!(entries.len(), 11);
+
+        let mut sorted = entries.clone();
+        sorted.sort();
+        assert_eq!(
+            entries, sorted,
+            "output must be sorted by chrom then position"
+        );
+    }
+
+    #[test]
+    fn test_process_and_annotate_flush_uses_max_indel_pos_across_alts() {
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=10000>"],
+            &[(0, 499, b"ACAGCAGCAG", &[b"AT", b"ACAGCAGCAGCAG"])],
+        );
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+        let tmp_bed = create_bed_file(&[("chr1", 10, 31, "7xCAG"), ("chr1", 500, 521, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
+
+        assert_eq!(stats.annotated_indels, 1);
+        assert_eq!(stats.dummy_indels, 1);
+
+        let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
+        let record = reader
+            .records()
+            .find(|r| r.as_ref().unwrap().pos() == 499)
+            .unwrap()
+            .unwrap();
+        let region_ids = get_info_strings(&record, b"REGION_ID").unwrap();
+        assert_eq!(
+            region_ids,
+            vec![".".to_string(), "chr1:500-521".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_process_and_annotate_multi_alt_both_match_same_region() {
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAGCAG", &[b"ACAGCAGCAG", b"ACAGCAGCAGCAG"])],
+        );
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
+
+        let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
+        let record = reader.records().next().unwrap().unwrap();
+        let region_ids = get_info_strings(&record, b"REGION_ID").unwrap();
+        assert_eq!(
+            region_ids,
+            vec!["chr1:100-121".to_string(), "chr1:100-121".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_process_and_annotate_errors_on_chrom_mismatch() {
+        let tmp_vcf = create_minimal_vcf(
+            &[
+                br"##contig=<ID=chr1,length=1000000>",
+                br"##contig=<ID=chr2,length=1000000>",
+            ],
+            &[(1, 99, b"ACAG", &[b"ACAGCAG"])], // only chr2
+        );
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]); // only chr1
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+
+        let result = process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux);
+        drop(writer);
+
+        assert!(result.is_err());
     }
 }
