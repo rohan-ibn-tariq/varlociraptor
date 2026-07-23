@@ -1353,6 +1353,43 @@ pub(crate) mod tests {
         create_test_record_multi_alt(writer, rid, pos, ref_allele, &[alt_allele])
     }
 
+    /// Minimal multi-record VCF builder for position/overlap-driven tests.
+    ///
+    /// # Note:
+    /// Unlike [`create_test_vcf`], which builds exactly one feature-rich
+    /// record (samples, AF, PROB_*, extra INFO) from a [`TestVcfConfig`],
+    /// this builds a header + N bare records (chrom/pos/REF/ALT only, no
+    /// samples/FORMAT). Use this when a test needs several records at
+    /// once and doesn't care about sample/format.
+    ///
+    /// # Arguments
+    /// * `header_lines` - Extra `##...` header lines (e.g. `##contig=<...>`)
+    ///   to push after `##fileformat=VCFv4.2`. Caller is responsible for
+    ///   declaring any contigs referenced by `records`.
+    /// * `records` - `(rid, pos, ref_allele, alt_alleles)` tuples, written
+    ///   in the given order. `rid` indexes into the contigs declared via
+    ///   `header_lines`, in declaration order.
+    ///
+    /// # Returns
+    /// A `NamedTempFile` containing the resulting VCF.
+    pub(crate) fn create_minimal_vcf(
+        header_lines: &[&[u8]],
+        records: &[(u32, i64, &[u8], &[&[u8]])],
+    ) -> NamedTempFile {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut header = bcf::Header::new();
+        header.push_record(br"##fileformat=VCFv4.2");
+        for line in header_lines {
+            header.push_record(line);
+        }
+        let mut wtr = bcf::Writer::from_path(tmp.path(), &header, true, bcf::Format::Vcf).unwrap();
+        for (rid, pos, ref_allele, alts) in records {
+            let rec = create_test_record_multi_alt(&wtr, *rid, *pos, ref_allele, alts);
+            wtr.write(&rec).unwrap();
+        }
+        tmp
+    }
+
     /* ==== BCF Extraction Function(s) tests ========= */
 
     #[test]
