@@ -413,7 +413,7 @@ mod tests {
     use crate::preprocessing::microsatellite_instability::header::prepare_header;
     use crate::utils::aux_info::tests::make_aux_collector;
     use crate::utils::bcf_utils::tests::{
-        create_test_vcf, read_first_record_simple, TestVcfConfig,
+        create_minimal_vcf, create_test_vcf, read_first_record_simple, TestVcfConfig,
     };
 
     // Helper: Create BED file
@@ -694,11 +694,10 @@ mod tests {
         // BED: chr1:100-121 7xCAG
         // Expected: 1 annotated, 0 dummy
 
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"ACAG",
-            alt_alleles: vec![b"ACAGCAG"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAG", &[b"ACAGCAG"])],
+        );
         let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
@@ -720,15 +719,14 @@ mod tests {
 
     #[test]
     fn test_process_and_annotate_dummy_injection() {
-        // VCF: chr1:200 A to T (SNV, not MS indel)
+        // VCF: chr1:100 A to T (SNV, not MS indel)
         // BED: chr1:100-121 7xCAG
         // Expected: 0 annotated, 1 dummy
 
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"T"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 100, b"A", &[b"T"])],
+        );
         let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
@@ -754,15 +752,14 @@ mod tests {
         // BED: chr1:200-221 7xCAG (valid, but no overlap with variant at pos 99)
         // Expected: 2 total regions, 1 valid processed, 1 dummy (invalid skipped, valid gets dummy indel)
 
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"AATAT"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"A", &[b"AATAT"])],
+        );
         let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[
-            ("chr1", 100, 160, "20xCAGCAGCAG"), // Invalid (motif >6bp)
+            ("chr1", 100, 180, "20xCAGCAGCAG"), // Invalid (motif >6bp)
             ("chr1", 200, 221, "7xCAG"),        // Valid but no variant overlap
         ]);
         let tmp_output = NamedTempFile::new().unwrap();
@@ -786,11 +783,10 @@ mod tests {
         // BED: chr1:100-121 7xCAG
         // Expected: 0 annotated, 1 dummy (imperfect doesn't count)
 
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"ACAG",
-            alt_alleles: vec![b"ACAGCAT"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAG", &[b"ACAGCAT"])],
+        );
         let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
@@ -816,11 +812,10 @@ mod tests {
         //      chr1:150-158 8xA     (no overlap)
         // Expected: 1 variant annotated with 2 region IDs, 1 dummy for chr1:150-158
 
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"ACAG",
-            alt_alleles: vec![b"ACAGCAG"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAG", &[b"ACAGCAG"])],
+        );
         let aux = make_aux_collector(tmp_vcf.path(), &[]);
 
         let tmp_bed = create_bed_file(&[
@@ -876,5 +871,30 @@ mod tests {
             cosmic.is_some(),
             "COSMIC_ID should be propagated via aux_info"
         );
+    }
+
+    #[test]
+    fn test_process_and_annotate_load_does_not_stop_early_on_large_anchor() {
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=10000>"],
+            &[
+                (0, 990, b"A", &[b"AT"]),
+                (0, 1001, b"ACAGCAGCAG", &[b"ACAGCAGCAGCAG"]),
+                (0, 1002, b"ACAG", &[b"ACAGCAG"]),
+            ],
+        );
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+        let tmp_bed = create_bed_file(&[("chr1", 1002, 1011, "1xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let out_header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut out_writer =
+            bcf::Writer::from_path(tmp_output.path(), &out_header, true, bcf::Format::Vcf).unwrap();
+
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut out_writer, &aux).unwrap();
+
+        assert_eq!(stats.annotated_indels, 2);
     }
 }
