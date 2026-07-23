@@ -179,7 +179,7 @@ pub(super) fn should_include_variant(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::bcf_utils::tests::{create_test_vcf, read_first_record, TestVcfConfig};
+    use crate::utils::bcf_utils::tests::{create_minimal_vcf, read_first_record, TestVcfConfig};
     use crate::utils::ms_bed::BedRegion;
 
     /* ========== is_perfect_repeat tests ============ */
@@ -262,11 +262,10 @@ mod tests {
 
     #[test]
     fn test_should_include_variant_filters_snv() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"T"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"A", &[b"T"])],
+        );
 
         let (_, header, record) = read_first_record(tmp_vcf.path());
 
@@ -283,11 +282,10 @@ mod tests {
 
     #[test]
     fn test_should_include_variant_perfect_indel() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"ACAG",
-            alt_alleles: vec![b"ACAGCAG"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAG", &[b"ACAGCAG"])],
+        );
 
         let (_, header, record) = read_first_record(tmp_vcf.path());
 
@@ -305,11 +303,10 @@ mod tests {
 
     #[test]
     fn test_should_include_variant_multi_allelic() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"T", b"ATG"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"A", &[b"T", b"ATG"])],
+        );
 
         let (_, header, record) = read_first_record(tmp_vcf.path());
 
@@ -329,11 +326,10 @@ mod tests {
 
     #[test]
     fn test_should_include_variant_filters_symbolic() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"A",
-            alt_alleles: vec![b"<DEL>"],
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"A", &[b"<DEL>"])],
+        );
 
         let (_reader, header, record) = read_first_record(tmp_vcf.path());
 
@@ -350,11 +346,10 @@ mod tests {
 
     #[test]
     fn test_should_include_variant_imperfect_repeat() {
-        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
-            ref_allele: b"ACAG",
-            alt_alleles: vec![b"ACAGCAT"], // Not perfect CAG repeat
-            ..Default::default()
-        });
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAG", &[b"ACAGCAT"])], // Not perfect CAG repeat
+        );
 
         let (_, header, record) = read_first_record(tmp_vcf.path());
 
