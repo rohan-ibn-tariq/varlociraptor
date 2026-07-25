@@ -33,13 +33,16 @@
 //! - `Count` - Counting operations
 //! - `Threshold` - Threshold validation
 //! - `AfThreshold` - Allele frequency threshold validation
+//! - `AfThresholds` - Allele frequency thresholds validation
 //! - `DistributionAf` - Microsatellite Distribution output type AF validation
 //! - `Motif` - Motif pattern operations (MSI)
 //! - `Output` - Output configuration (MSI)
 //! - `Events` - Event validation operations
 //! - `Field` - VCF/BCF field operations etc.
+//! - `InfoFields` - VCF/BCF info fields
 //! - `Regions` - Genomic regions operations etc.
 //! - `RegionId` - REGION_ID parsing operations etc.
+//! - `SlidingWindow` - Sliding Window configuration etc.
 //!
 //! ## Error Types:
 //! - `Invalid` - Validation failure
@@ -61,8 +64,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::cli::MIN_THREAD_COUNT;
-use crate::constants::{DEFAULT_MSI_THRESHOLD, MIN_MSI_THRESHOLD};
+use crate::constants::{DEFAULT_MSI_THRESHOLD, MIN_MSI_THRESHOLD, MIN_THREAD_COUNT};
 
 #[derive(Error, Debug, PartialEq)]
 pub(crate) enum Error {
@@ -134,6 +136,8 @@ pub(crate) enum Error {
         expected: String,
         found: String,
     },
+    #[error("VCF/BCF header missing INFO field(s): {fields}")]
+    VcfInfoFieldsMissing { fields: String },
     /* -------------------- Concurrency ------------------------------ */
     #[error(
         "invalid thread count: must be at least {}, got {count}",
@@ -228,6 +232,12 @@ pub(crate) enum Error {
     MsiConfigThresholdInvalid { threshold: f64 },
     #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold}")]
     MsiConfigAfThresholdInvalid { threshold: f64 },
+    #[error("af-thresholds list has an invalid threshold: {threshold}")]
+    MsiConfigAfThresholdsInvalid { threshold: f64 },
+    #[error("af-thresholds list must not be empty")]
+    MsiConfigAfThresholdsEmpty,
+    #[error("sliding window size must be > 0 when heatmap output is requested, got {window_size}")]
+    MsiConfigSlidingWindowInvalid { window_size: u64 },
     #[error(
         "--distribution-af ({distribution_af}) is not present in the AF threshold list {af_thresholds:?}. \
         Choose a value already in the af-thresholds list."
@@ -262,6 +272,8 @@ pub(crate) enum Error {
         existing_region: String,
         new_region: String,
     },
+    #[error("No valid BED MSI region found")]
+    MsiBedRegionsEmpty,
     #[error("Malformed REGION_ID '{region_id}': {details}")]
     MsiRegionIdMalformed { region_id: String, details: String },
 }

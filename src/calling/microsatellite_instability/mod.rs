@@ -19,11 +19,12 @@ use anyhow::{Context, Result};
 use log::info;
 use rust_htslib::bcf::{self, header::HeaderView, Read};
 
-use crate::cli::validate_vcf_file;
+use crate::cli::{validate_thread_count, validate_vcf_file};
 use crate::constants::{EPSILON, MIN_MSI_THRESHOLD};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
-    is_phred_scaled_from_path, validate_events_exist, validate_samples_exist,
+    is_phred_scaled_from_path, validate_events_exist, validate_required_vcf_fields_msi,
+    validate_samples_exist, validate_vcf_file as validate_ms_vcf_file,
 };
 
 use dp_analysis::{AnalysisConfig, OutputRequirements};
@@ -92,21 +93,43 @@ impl MSIConfig {
     }
 
     /// Validate the MSI configuration.
+    ///
     /// Responsibilities:
-    /// 1. Checks for valid MSI threshold;
-    /// 2. Every entry of `af_thresholds` in [0.0, 1.0]. Required even though
-    ///    `--af-thresholds` is a `hidden` CLI flag - hidden only suppresses it
-    ///    from `--help`, it does not prevent a caller (e.g. an evaluation pipeline)
-    ///    from overriding it with an out-of-range value.
-    /// 3. `distribution_af` / `windowed_af` individually in [0.0, 1.0].
-    /// 4. `distribution_af` present in `af_thresholds` (epsilon-compared) -
-    ///    required because `calculate_msi_metrics` only populates `distribution`
-    ///    when the `af-thresholds` contains `distribution_af` exactly.
-    /// 5. Checks at least one output specified;
-    /// 6. Validates the calls file format using existing validators from cli.rs;
-    /// 7. Validates the calls file contains the specified sample.
-    /// 8. Validates the calls file contains the specified events in the header.
+    /// 1. `calls`: validates file extension, opens the file, checks it
+    ///    contains at least one variant record, and that its header declares
+    ///    FORMAT/AF with the correct type/shape (Float, one value per ALT allele).
+    /// 2. `sample`: validates the calls file contains the specified sample.
+    /// 3. `events`: validates the calls file contains the specified events in
+    ///    the header, with each INFO/PROB_{EVENT} field having the correct
+    ///    type/shape.
+    /// 4. `msi_threshold`: checks for a valid MSI threshold.
+    /// 5. `af_thresholds`: non-empty, and every entry in [0.0, 1.0]. Required
+    ///    even though `--af-thresholds` is a `hidden` CLI flag - hidden only
+    ///    suppresses it from `--help`, it does not prevent a caller (e.g. an
+    ///    evaluation pipeline) from overriding it with an invalid value.
+    /// 6. `distribution_af`: in [0.0, 1.0], and present in `af_thresholds`
+    ///    - required because `calculate_msi_metrics` only populates `distribution
+    ///    when `af_thresholds` contains distribution_af` exactly.
+    /// 7. `windowed_af`: in [0.0, 1.0].
+    /// 8. `sliding_window`: != 0 when a heatmap output is requested.
+    /// 9. `threads`: if given, is >= `MIN_THREAD_COUNT`.
+    /// 10. Output paths: checks at least one output is specified.
     pub fn validate(&self) -> Result<()> {
+        // --- calls ---
+        validate_vcf_file(&self.calls)?;
+        let mut vcf =
+            bcf::Reader::from_path(self.calls.as_path()).context("Failed to open VCF file")?;
+        let header: HeaderView = vcf.header().clone();
+        validate_ms_vcf_file(&mut vcf)?;
+        validate_required_vcf_fields_msi(&header)?;
+
+        // --- sample ---
+        validate_samples_exist(&header, &[self.sample.clone()])?;
+
+        // --- events ---
+        validate_events_exist(&header, &self.events)?;
+
+        // --- msi_threshold ---
         if self.msi_threshold <= MIN_MSI_THRESHOLD {
             return Err(Error::MsiConfigThresholdInvalid {
                 threshold: self.msi_threshold,
@@ -114,22 +137,21 @@ impl MSIConfig {
             .into());
         }
 
+        // --- af_thresholds ---
+        if self.af_thresholds.is_empty() {
+            return Err(Error::MsiConfigAfThresholdsEmpty.into());
+        }
+
         for &af in &self.af_thresholds {
             if !(0.0..=1.0).contains(&af) {
-                return Err(Error::MsiConfigAfThresholdInvalid { threshold: af }.into());
+                return Err(Error::MsiConfigAfThresholdsInvalid { threshold: af }.into());
             }
         }
 
+        // --- distribution_af ---
         if !(0.0..=1.0).contains(&self.distribution_af) {
             return Err(Error::MsiConfigAfThresholdInvalid {
                 threshold: self.distribution_af,
-            }
-            .into());
-        }
-
-        if !(0.0..=1.0).contains(&self.windowed_af) {
-            return Err(Error::MsiConfigAfThresholdInvalid {
-                threshold: self.windowed_af,
             }
             .into());
         }
@@ -146,6 +168,27 @@ impl MSIConfig {
             .into());
         }
 
+        // --- windowed_af ---
+        if !(0.0..=1.0).contains(&self.windowed_af) {
+            return Err(Error::MsiConfigAfThresholdInvalid {
+                threshold: self.windowed_af,
+            }
+            .into());
+        }
+
+        // --- sliding_window ---
+        let needs_heatmap = self.plot_heatmap.is_some() || self.data_heatmap.is_some();
+        if needs_heatmap && self.sliding_window == 0 {
+            return Err(Error::MsiConfigSlidingWindowInvalid {
+                window_size: self.sliding_window,
+            }
+            .into());
+        }
+
+        // --- threads ---
+        validate_thread_count(self.threads)?;
+
+        // --- output paths ---
         if self.plot_distribution.is_none()
             && self.plot_pseudotime.is_none()
             && self.plot_heatmap.is_none()
@@ -156,17 +199,10 @@ impl MSIConfig {
             return Err(Error::MsiConfigOutputMissing.into());
         }
 
-        let vcf =
-            bcf::Reader::from_path(self.calls.as_path()).context("Failed to open VCF file")?;
-        let header: HeaderView = vcf.header().clone();
-
-        validate_vcf_file(&self.calls)?;
-        validate_samples_exist(&header, &[self.sample.clone()])?;
-        validate_events_exist(&header, &self.events)?;
-
         Ok(())
     }
 }
+
 /* ================================================ */
 
 /// Orchestrates the MSI calling workflow: extract regions from a preprocessed +
@@ -195,6 +231,10 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
             config.is_phred,
         )?;
         stats.log_stats(&regions);
+
+        if stats.total_ms_regions == 0 {
+            return Err(Error::MsiBedRegionsEmpty.into());
+        }
 
         info!("----------------------------------------------");
         info!("Step 2: AF Evolution Analysis");

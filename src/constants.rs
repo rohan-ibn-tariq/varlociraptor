@@ -10,6 +10,7 @@
 //! 2. MSI: Constants - Microsatellite Instability related constants.
 //!
 
+use rust_htslib::bcf::header::{TagLength, TagType};
 use std::collections::HashSet;
 
 /* =============== GENERIC: CONSTANTS ============== */
@@ -23,6 +24,9 @@ use std::collections::HashSet;
 /// Floating-point tolerance for threshold/equality comparisons in production code
 /// (e.g. checking whether a configured AF value is present in a complete list).
 pub(crate) const EPSILON: f64 = 1e-9;
+
+/// Minimum thread count for parallel tasks.
+pub(crate) const MIN_THREAD_COUNT: usize = 1;
 
 /* =============== MSI: CONSTANTS ================== */
 
@@ -77,6 +81,16 @@ pub(crate) const MSI_DEFAULT_DISTRIBUTION_AF: &str = "0.05";
 /// Variants with AF >= this threshold are included in the windowed heatmap analysis.
 /// This AF threshold value is supported by the literature : https://pmc.ncbi.nlm.nih.gov/articles/PMC8172533/.
 pub(crate) const MSI_DEFAULT_WINDOWED_AF: &str = "0.05";
+
+/// Shape shared by varlociraptor-emitted per-ALT-allele Float
+/// INFO/PROB_{event} fields.
+pub(crate) const MSI_INFO_PROB_EVENT_FIELD_TYPE: TagType = TagType::Float;
+pub(crate) const MSI_INFO_PROB_EVENT_FIELD_LENGTH: TagLength = TagLength::AltAlleles;
+
+/// Shape shared by varlociraptor-emitted per-ALT-allele Float
+/// FORMAT/AF field.
+pub(crate) const MSI_FORMAT_AF_FIELD_TYPE: TagType = TagType::Float;
+pub(crate) const MSI_FORMAT_AF_FIELD_LENGTH: TagLength = TagLength::AltAlleles;
 
 lazy_static! {
     /// INFO fields copied explicitly from input to output in MSI preprocessing.

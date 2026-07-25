@@ -24,6 +24,7 @@ use crate::calling::variants::calling::{
 use crate::calling::variants::preprocessing::haplotype_feature_index::HaplotypeFeatureIndex;
 use crate::candidates;
 use crate::candidates::methylation::MethylationMotif;
+use crate::constants::MIN_THREAD_COUNT;
 use crate::conversion;
 use crate::errors;
 use crate::estimation;
@@ -37,7 +38,6 @@ use crate::preprocessing;
 use crate::preprocessing::microsatellite_instability as msi_preprocessing;
 use crate::reference;
 use crate::testcase;
-use crate::utils::ms_bed;
 use crate::utils::PathMap;
 use crate::variants::evidence::realignment;
 
@@ -47,8 +47,6 @@ use crate::variants::model::{AlleleFreq, VariantType};
 use crate::variants::sample::{estimate_alignment_properties, MethylationReadtype};
 
 use crate::SimpleEvent;
-
-pub const MIN_THREAD_COUNT: usize = 1;
 
 /* ========================= Generic Validators ======================= */
 
@@ -105,7 +103,7 @@ pub(crate) fn validate_vcf_file(path: &Path) -> Result<()> {
 ///
 /// Returns
 /// `Ok(())` if the thread count is valid, otherwise returns an error.
-fn validate_thread_count(threads: Option<usize>) -> Result<()> {
+pub(crate) fn validate_thread_count(threads: Option<usize>) -> Result<()> {
     if let Some(count) = threads {
         if count < MIN_THREAD_COUNT {
             bail!(errors::Error::ThreadCountInvalid { count: (count) });

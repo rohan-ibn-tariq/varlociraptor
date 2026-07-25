@@ -18,6 +18,10 @@ use log::{debug, info, warn};
 use rust_htslib::bcf::header::{HeaderView, TagLength, TagType};
 use rust_htslib::bcf::{self, record::Numeric, Read};
 
+use crate::constants::{
+    MSI_FORMAT_AF_FIELD_LENGTH, MSI_FORMAT_AF_FIELD_TYPE, MSI_INFO_PROB_EVENT_FIELD_LENGTH,
+    MSI_INFO_PROB_EVENT_FIELD_TYPE,
+};
 use crate::errors::Error;
 use crate::utils::genomics::calculate_dynamic_svlen;
 use crate::utils::is_phred_scaled;
@@ -736,6 +740,43 @@ fn validate_vcf_header_field(
     }
 }
 
+/// Validate that INFO fields exist in VCF header.
+///
+/// Checks VCF header for presence of each INFO field name. It does not
+/// check field type, since fields may be any INFO type and intent here
+/// is just to check the presence of the field.
+///
+/// # Arguments
+/// * `header` - VCF header to check for INFO field declarations
+/// * `fields` - Slice of INFO field names to validate (e.g., ["HETEROZYGOSITY"])
+///
+/// # Returns
+/// * `Ok(())` if all fields exist
+/// * `Err` if any field is missing
+///
+/// # Errors
+/// Returns error if any requested INFO field is not declared in the VCF header.
+/// Error message includes comma-separated list of missing fields.
+///
+/// # Example
+/// assert!(validate_info_fields_exist(&header, &vec!["HETEROZYGOSITY".to_string()]).is_ok());
+pub(crate) fn validate_info_fields_exist(header: &HeaderView, fields: &[String]) -> Result<()> {
+    let missing: Vec<String> = fields
+        .iter()
+        .filter(|f| header.info_type(f.as_bytes()).is_err())
+        .cloned()
+        .collect();
+
+    if !missing.is_empty() {
+        return Err(Error::VcfInfoFieldsMissing {
+            fields: missing.join(", "),
+        }
+        .into());
+    }
+    info!("  - INFO fields validated: {:?}", fields);
+    Ok(())
+}
+
 /// Validate that required samples exist in VCF header.
 ///
 /// Checks VCF header for presence of all requested sample names.
@@ -778,10 +819,12 @@ pub(crate) fn validate_samples_exist(
     Ok(())
 }
 
-/// Validate that required events exist in VCF header.
+/// Validate that required events exist in VCF header, with correct type.
 ///
 /// Checks VCF header for presence of INFO/PROB_{EVENT} fields
-/// for each requested event name. Event names are automatically
+/// for each requested event name, and that each present field has the expected
+/// shape emitted by varlociraptor's calling model: `Type=Float, Number=A`
+/// (one probability per ALT allele). Event names are automatically
 /// converted to uppercase and prefixed with "PROB_".
 ///
 /// # Arguments
@@ -789,12 +832,14 @@ pub(crate) fn validate_samples_exist(
 /// * `event_names` - Slice of event names to validate (e.g., ["somatic_tumor"])
 ///
 /// # Returns
-/// * `Ok(())` if all event fields exist
-/// * `Err` if any event field is missing
+/// * `Ok(())` if all event fields exist with the correct type/shape
+/// * `Err` if any event field is missing, or exists with the wrong type/shape
 ///
 /// # Errors
-/// Returns error if any INFO/PROB_{EVENT} field is not found in VCF header.
-/// Error message includes comma-separated list of missing events.
+/// * `VcfEventsMissing` if any INFO/PROB_{EVENT} field is not found. Error
+///   message includes comma-separated list of missing events.
+/// * `VcfHeaderFieldTypeInvalid` if a PROB_{EVENT} field is found but isn't
+///   `Type=Float, Number=A`.
 ///
 /// # Event Field Mapping
 /// Event name          -> INFO field checked
@@ -809,8 +854,17 @@ pub(crate) fn validate_events_exist(header: &HeaderView, event_names: &[String])
     for event_name in event_names {
         let field_name = format!("PROB_{}", event_name.to_uppercase());
 
-        if header.info_type(field_name.as_bytes()).is_err() {
-            missing_events.push(event_name.clone());
+        match header.info_type(field_name.as_bytes()) {
+            Err(_) => missing_events.push(event_name.clone()),
+            Ok(_) => {
+                validate_vcf_header_field(
+                    header.info_type(field_name.as_bytes()),
+                    "INFO",
+                    &field_name,
+                    MSI_INFO_PROB_EVENT_FIELD_TYPE,
+                    MSI_INFO_PROB_EVENT_FIELD_LENGTH,
+                )?;
+            }
         }
     }
 
@@ -841,8 +895,8 @@ pub(crate) fn validate_required_vcf_fields_msi(header: &HeaderView) -> Result<()
         header.format_type(b"AF"),
         "FORMAT",
         "AF",
-        TagType::Float,
-        TagLength::AltAlleles,
+        MSI_FORMAT_AF_FIELD_TYPE,
+        MSI_FORMAT_AF_FIELD_LENGTH,
     )?;
 
     Ok(())
@@ -2077,6 +2131,81 @@ pub(crate) mod tests {
     /* ======== validate_vcf_file tests ============== */
 
     #[test]
+    fn test_validate_vcf_header_field_correct() {
+        let header =
+            create_header_view(&[br##"##INFO=<ID=TEST,Number=A,Type=Float,Description="Test">"##]);
+        assert!(validate_vcf_header_field(
+            header.info_type(b"TEST"),
+            "INFO",
+            "TEST",
+            TagType::Float,
+            TagLength::AltAlleles,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_validate_vcf_header_field_wrong_type() {
+        let header = create_header_view(&[
+            br##"##INFO=<ID=TEST,Number=A,Type=Integer,Description="Test">"##,
+        ]);
+        let result = validate_vcf_header_field(
+            header.info_type(b"TEST"),
+            "INFO",
+            "TEST",
+            TagType::Float,
+            TagLength::AltAlleles,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_vcf_header_field_missing() {
+        let header = create_header_view(&[]);
+        let result = validate_vcf_header_field(
+            header.info_type(b"TEST"),
+            "INFO",
+            "TEST",
+            TagType::Float,
+            TagLength::AltAlleles,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_info_fields_exist_all_present() {
+        let header = create_header_view(&[
+            br##"##INFO=<ID=CUSTOM1,Number=1,Type=String,Description="Test">"##,
+        ]);
+        assert!(validate_info_fields_exist(&header, &["CUSTOM1".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_info_fields_exist_missing() {
+        let header = create_header_view(&[]);
+        let result = validate_info_fields_exist(&header, &["TEST".to_string()]);
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("TEST"));
+    }
+
+    #[test]
+    fn test_validate_info_fields_exist_empty_list() {
+        let header = create_header_view(&[]);
+        assert!(validate_info_fields_exist(&header, &[]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_info_fields_exist_partial_missing() {
+        let header =
+            create_header_view(&[br##"##INFO=<ID=OK,Number=1,Type=String,Description="Test">"##]);
+        let result =
+            validate_info_fields_exist(&header, &["OK".to_string(), "MISSING".to_string()]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("MISSING") && !msg.contains("OK"));
+    }
+
+    #[test]
     fn test_validate_samples_exist_single_sample() {
         let (tmp_vcf, sample_names) = create_test_vcf(TestVcfConfig {
             num_samples: 1,
@@ -2268,6 +2397,24 @@ pub(crate) mod tests {
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("missing_event"));
         assert!(!err_msg.contains("somatic")); // Valid one not in error
+    }
+
+    #[test]
+    fn test_validate_events_exist_wrong_type() {
+        let header = create_header_view(&[
+            br##"##INFO=<ID=PROB_FOO,Number=A,Type=Integer,Description="Test">"##,
+        ]);
+        let result = validate_events_exist(&header, &["foo".to_string()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_events_exist_wrong_length() {
+        let header = create_header_view(&[
+            br##"##INFO=<ID=PROB_FOO,Number=1,Type=Float,Description="Test">"##,
+        ]);
+        let result = validate_events_exist(&header, &["foo".to_string()]);
+        assert!(result.is_err());
     }
 
     #[test]

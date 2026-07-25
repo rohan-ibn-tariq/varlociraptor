@@ -24,7 +24,9 @@ use rust_htslib::bcf::{self, Format, Read};
 
 use crate::cli::{validate_bed_file, validate_vcf_file};
 use crate::utils::aux_info::AuxInfoCollector;
-use crate::utils::bcf_utils::validate_vcf_file as validate_ms_vcf_file;
+use crate::utils::bcf_utils::{
+    validate_info_fields_exist, validate_vcf_file as validate_ms_vcf_file,
+};
 use crate::utils::ms_bed::validate_bed_file as validate_ms_bed_file;
 
 use header::prepare_header;
@@ -62,6 +64,7 @@ impl PreprocessMSIConfig {
         validate_ms_bed_file(&self.microsatellite_bed)?;
         info!("Validating VCF file: {}", self.candidate_vcf.display());
         validate_ms_vcf_file(&mut vcf)?;
+        validate_info_fields_exist(vcf.header(), &self.propagate_info_fields)?;
 
         Ok(())
     }
