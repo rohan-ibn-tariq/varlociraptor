@@ -90,8 +90,6 @@ pub(crate) enum Error {
         "invalid VCF/BCF file path (expected .vcf, .vcf.gz, .bcf, or .bcf.gz extension): {path}"
     )]
     VcfFileInvalid { path: PathBuf },
-    #[error("VCF/BCF file contains no samples")]
-    VcfSamplesMissing,
     #[error("VCF/BCF file does not contain sample(s): {sample}")]
     VcfSamplesNotFound { sample: String },
     #[error("VCF/BCF header missing required event field(s): {events}. Events must exist as INFO/PROB_{{EVENT}} fields")]
@@ -120,10 +118,6 @@ pub(crate) enum Error {
         chrom: String,
         pos: i64,
     },
-    #[error("VCF/BCF file does not contain the following excluded sample(s): {samples}")]
-    VcfSampleExclusionInvalid { samples: String },
-    #[error("VCF/BCF file contains no samples after excluding specified samples")]
-    VcfSamplesEmptyAfterExclusion,
     #[error("VCF/BCF header missing or malformed required {location} field: {field}")]
     VcfHeaderFieldMissing {
         field: String,
