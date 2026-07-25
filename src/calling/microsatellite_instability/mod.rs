@@ -151,6 +151,7 @@ impl MSIConfig {
         // --- distribution_af ---
         if !(0.0..=1.0).contains(&self.distribution_af) {
             return Err(Error::MsiConfigAfThresholdInvalid {
+                field: "distribution_af",
                 threshold: self.distribution_af,
             }
             .into());
@@ -171,6 +172,7 @@ impl MSIConfig {
         // --- windowed_af ---
         if !(0.0..=1.0).contains(&self.windowed_af) {
             return Err(Error::MsiConfigAfThresholdInvalid {
+                field: "windowed_af",
                 threshold: self.windowed_af,
             }
             .into());

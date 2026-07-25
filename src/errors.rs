@@ -230,8 +230,8 @@ pub(crate) enum Error {
         DEFAULT_MSI_THRESHOLD
     )]
     MsiConfigThresholdInvalid { threshold: f64 },
-    #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold}")]
-    MsiConfigAfThresholdInvalid { threshold: f64 },
+    #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold} for `{field}`")]
+    MsiConfigAfThresholdInvalid { field: &'static str, threshold: f64 },
     #[error("af-thresholds list has an invalid threshold: {threshold}")]
     MsiConfigAfThresholdsInvalid { threshold: f64 },
     #[error("af-thresholds list must not be empty")]
