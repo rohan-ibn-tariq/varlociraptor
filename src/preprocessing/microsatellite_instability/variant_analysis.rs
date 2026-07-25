@@ -179,7 +179,7 @@ pub(super) fn should_include_variant(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::bcf_utils::tests::{create_minimal_vcf, read_first_record, TestVcfConfig};
+    use crate::utils::bcf_utils::tests::{create_minimal_vcf, read_first_record};
     use crate::utils::ms_bed::BedRegion;
 
     /* ========== is_perfect_repeat tests ============ */
