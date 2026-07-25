@@ -739,7 +739,6 @@ fn run_windowed_analysis(
 /// * `af_thresholds`      - AF thresholds to analyze in parallel
 /// * `distribution_af`    - Fixed AF forwarded to `calculate_msi_metrics` on each call
 ///                          marking which AF should populate the full distribution conditionally
-
 /// * `output_req`         - Which outputs to compute
 ///
 /// # Returns

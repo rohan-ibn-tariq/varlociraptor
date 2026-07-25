@@ -261,7 +261,7 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
             total_regions: stats.total_ms_regions,
             sample: &config.sample,
             msi_high_threshold: config.msi_threshold,
-            af_thresholds: af_thresholds,
+            af_thresholds,
             num_threads: config.threads,
             window_size: config.sliding_window,
             distribution_af: config.distribution_af,
