@@ -48,7 +48,7 @@ pub(super) struct Variant {
     /// P(variant absent) = 1.0 - P(at least one specified event).
     pub prob_absent: f64,
     /// Allele frequency for the sample (FORMAT:AF).
-    pub af: f64,
+    pub af: f32,
 }
 
 /// All variants observed within one microsatellite region.
@@ -324,7 +324,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
-    use crate::utils::stats::test_constants::TEST_EPSILON_LOOSE;
+    use crate::utils::stats::test_constants::{TEST_EPSILON_LOOSE_F32, TEST_EPSILON_LOOSE};
 
     /* ====== Shared header builder =============== */
 
@@ -487,7 +487,7 @@ mod tests {
         let (regions, _) = extract_somatic(&tmp);
         let v = &regions[0].variants[0];
         assert!((v.prob_absent - 0.1).abs() < TEST_EPSILON_LOOSE);
-        assert!((v.af - 0.8).abs() < TEST_EPSILON_LOOSE);
+        assert!((v.af - 0.8).abs() < TEST_EPSILON_LOOSE_F32);
     }
 
     #[test]

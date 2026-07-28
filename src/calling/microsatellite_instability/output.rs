@@ -219,7 +219,7 @@ pub(super) fn write_distribution_data(
     sample: &str,
     path: &Path,
     msi_threshold: f64,
-    distribution_af: f64,
+    distribution_af: f32,
 ) -> Result<()> {
     let file = File::create(path).context("Failed to create Distribution data TSV.")?;
     let mut writer = BufWriter::new(file);
@@ -278,7 +278,7 @@ pub(super) fn generate_distribution_plot_spec(
     sample: &str,
     path: &Path,
     msi_threshold: f64,
-    distribution_af: f64,
+    distribution_af: f32,
 ) -> Result<()> {
     let mut data = Vec::new();
     let af_key = format!("{:.2}", distribution_af);
@@ -351,19 +351,19 @@ pub(super) fn write_pseudotime_data(
         msi_threshold
     )?;
 
-    let mut af_pairs: Vec<(f64, String)> = results
+    let mut af_pairs: Vec<(f32, String)> = results
         .keys()
         .filter_map(|af_str| {
             af_str
-                .parse::<f64>()
+                .parse::<f32>()
                 .ok()
-                .map(|af_f64| (af_f64, af_str.clone()))
+                .map(|af_f32| (af_f32, af_str.clone()))
         })
         .collect();
 
     af_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
 
-    for (af_f64, af_str) in af_pairs {
+    for (af_f32, af_str) in af_pairs {
         let result = match results.get(&af_str) {
             Some(r) => r,
             None => continue,
@@ -386,7 +386,7 @@ pub(super) fn write_pseudotime_data(
             writer,
             "{}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}",
             sample,
-            af_f64,
+            af_f32,
             result.msi_score_map.unwrap_or(0.0),
             result.k_map.unwrap_or(0),
             result.regions_with_variants.unwrap_or(0),
@@ -444,19 +444,19 @@ pub(super) fn generate_pseudotime_plot_spec(
 ) -> Result<()> {
     let mut data = Vec::new();
 
-    let mut af_pairs: Vec<(f64, String)> = results
+    let mut af_pairs: Vec<(f32, String)> = results
         .keys()
         .filter_map(|af_str| {
             af_str
-                .parse::<f64>()
+                .parse::<f32>()
                 .ok()
-                .map(|af_f64| (af_f64, af_str.clone()))
+                .map(|af_f32| (af_f32, af_str.clone()))
         })
         .collect();
 
     af_pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    for (af_f64, af_str) in &af_pairs {
+    for (af_f32, af_str) in &af_pairs {
         let result = match results.get(af_str) {
             Some(r) => r,
             None => continue,
@@ -464,7 +464,7 @@ pub(super) fn generate_pseudotime_plot_spec(
 
         let msi_score = result.msi_score_map.unwrap_or(0.0);
         data.push(json!({
-            "af_threshold": af_f64,
+            "af_threshold": af_f32,
             "msi_score": msi_score,
             "lower_bound": result.uncertainty_lower.unwrap_or(msi_score),
             "upper_bound": result.uncertainty_upper.unwrap_or(msi_score),

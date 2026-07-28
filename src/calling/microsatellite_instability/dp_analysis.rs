@@ -61,7 +61,7 @@ pub(super) struct DpResult {
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct AfEvolutionResult {
     pub sample: String,
-    pub af_threshold: f64,
+    pub af_threshold: f32,
     // Only computed if pseudotime output requested:
     #[serde(skip_serializing_if = "Option::is_none")]
     pub k_map: Option<usize>,
@@ -172,15 +172,15 @@ pub(super) struct AnalysisConfig<'a> {
     /// Threshold (percentage) at or above which a sample is classified MSI-High.
     pub msi_high_threshold: f64,
     /// Allele frequency thresholds to compute pseudotime/distribution analysis data.
-    pub af_thresholds: Vec<f64>,
+    pub af_thresholds: Vec<f32>,
     /// Thread count for the rayon pool (`None` = rayon default).
     pub num_threads: Option<usize>,
     /// Sliding window width (bp) for heatmap analysis.
     pub window_size: u64,
     /// Fixed AF at which the full P(K=k) distribution is populated.
-    pub distribution_af: f64,
+    pub distribution_af: f32,
     /// Fixed AF used for windowed heatmap analysis.
-    pub windowed_af: f64,
+    pub windowed_af: f32,
 }
 
 /* ================================================ */
@@ -336,7 +336,7 @@ fn setup_thread_pool(num_threads: Option<usize>) {
 /// Flat filtered view with region boundary tracking.
 fn filter_regions_by_af<'a>(
     regions: &'a [RegionSummary],
-    af_threshold: f64,
+    af_threshold: f32,
 ) -> FilteredRegions<'a> {
     let mut all_variants = Vec::new();
     let mut region_starts = Vec::new();
@@ -462,10 +462,10 @@ fn calculate_msi_metrics(
     filtered: &FilteredRegions,
     total_regions: usize,
     msi_high_threshold: f64,
-    af_threshold: f64,
+    af_threshold: f32,
     sample: String,
     output_req: OutputRequirements,
-    distribution_af: f64,
+    distribution_af: f32,
 ) -> AfEvolutionResult {
     // Step 1: Compute region instability probabilities
     // For each region, calculate P(at least one variant present)
@@ -646,7 +646,7 @@ fn get_window_slice<'a>(
 /// assert_eq!(run_windowed_analysis(&regions, 0.1, 1_000_000), vec![WindowResult { chrom: "chr1", window_start: 0, window_end: 1_000_000, msi_score: 2.5, posterior_probability: 0.8, regions_in_window: 40 }, ...]);
 fn run_windowed_analysis(
     regions: &[RegionSummary],
-    af_threshold: f64,
+    af_threshold: f32,
     window_size: u64,
 ) -> Vec<WindowResult> {
     if regions.is_empty() || window_size == 0 {
@@ -748,8 +748,8 @@ fn run_global_analysis(
     total_regions: usize,
     sample: &str,
     msi_high_threshold: f64,
-    af_thresholds: &[f64],
-    distribution_af: f64,
+    af_thresholds: &[f32],
+    distribution_af: f32,
     output_req: OutputRequirements,
 ) -> HashMap<String, AfEvolutionResult> {
     let results = Mutex::new(HashMap::new());
@@ -879,10 +879,10 @@ pub(super) fn run_af_evolution_analysis(
 mod tests {
     use super::*;
 
-    use crate::utils::stats::test_constants::TEST_EPSILON;
+    use crate::utils::stats::test_constants::{TEST_EPSILON_F32, TEST_EPSILON};
 
     /// Create a test Variant with given absence probability and allele frequency.
-    fn make_variant(prob: f64, af: f64) -> Variant {
+    fn make_variant(prob: f64, af: f32) -> Variant {
         Variant {
             prob_absent: prob,
             af,
@@ -1109,8 +1109,8 @@ mod tests {
 
         let filtered = filter_regions_by_af(&regions, 0.5);
         assert_eq!(filtered.len(), 2); // Only first and third
-        assert!(filtered.get_region(0)[0].af - 0.8 < TEST_EPSILON);
-        assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON);
+        assert!(filtered.get_region(0)[0].af - 0.8 < TEST_EPSILON_F32);
+        assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON_F32);
     }
 
     #[test]

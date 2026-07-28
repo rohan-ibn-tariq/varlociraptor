@@ -225,9 +225,9 @@ pub(crate) enum Error {
     )]
     MsiConfigThresholdInvalid { threshold: f64 },
     #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold} for `{field}`")]
-    MsiConfigAfThresholdInvalid { field: &'static str, threshold: f64 },
+    MsiConfigAfThresholdInvalid { field: &'static str, threshold: f32 },
     #[error("af-thresholds list has an invalid threshold: {threshold}")]
-    MsiConfigAfThresholdsInvalid { threshold: f64 },
+    MsiConfigAfThresholdsInvalid { threshold: f32 },
     #[error("af-thresholds list must not be empty")]
     MsiConfigAfThresholdsEmpty,
     #[error("sliding window size must be > 0 when heatmap output is requested, got {window_size}")]
@@ -237,8 +237,8 @@ pub(crate) enum Error {
         Choose a value already in the af-thresholds list."
     )]
     MsiConfigDistributionAfMissing {
-        distribution_af: f64,
-        af_thresholds: Vec<f64>,
+        distribution_af: f32,
+        af_thresholds: Vec<f32>,
     },
     #[error("at least one output must be specified: use --plot-pseudotime, --plot-distribution, --data-pseudotime, or --data-distribution")]
     MsiConfigOutputMissing,

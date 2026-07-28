@@ -51,12 +51,12 @@ pub struct MSIConfig {
     /// Note: This field is populated during CLI parsing and currently not validated for non [0-1] values
     /// as the this field is hidden constant set at CLI level. So future changes to expose this field
     /// to users should include validation for this field.
-    pub af_thresholds: Vec<f64>,
+    pub af_thresholds: Vec<f32>,
     /// Fixed AF at which the full P(K=k) distribution is reported.
     /// Must be present in `af_thresholds` - enforced in `validate()`.
-    pub distribution_af: f64,
+    pub distribution_af: f32,
     /// Fixed AF used for windowed heatmap analysis. Independent of `af_thresholds`.
-    pub windowed_af: f64,
+    pub windowed_af: f32,
     /// Sliding window size (bp) for regional MSI heatmap analysis (default: 1,000,000).
     /// Only used if --plot-heatmap or --data-heatmap specified.
     pub sliding_window: u64,
@@ -160,7 +160,7 @@ impl MSIConfig {
         let is_distribution_af = self
             .af_thresholds
             .iter()
-            .any(|af| (af - self.distribution_af).abs() < EPSILON);
+            .any(|af| (af - self.distribution_af).abs() < EPSILON as f32);
         if !is_distribution_af {
             return Err(Error::MsiConfigDistributionAfMissing {
                 distribution_af: self.distribution_af,
@@ -249,7 +249,7 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
             needs_heatmap: config.plot_heatmap.is_some() || config.data_heatmap.is_some(),
         };
 
-        let af_thresholds: Vec<f64> = if output_req.needs_pseudotime {
+        let af_thresholds: Vec<f32> = if output_req.needs_pseudotime {
             config.af_thresholds.clone()
         } else if output_req.needs_distribution {
             vec![config.distribution_af]

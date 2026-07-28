@@ -831,7 +831,7 @@ pub enum CallKind {
             use_delimiter = true,
             help = "Allele frequency thresholds for MSI evolution analysis (internal)."
         )]
-        af_thresholds: Vec<f64>,
+        af_thresholds: Vec<f32>,
         #[structopt(
             long = "distribution-af",
             default_value = constants::MSI_DEFAULT_DISTRIBUTION_AF,
@@ -839,14 +839,14 @@ pub enum CallKind {
                     (used by --plot-distribution / --data-distribution). Choose from the default \
                     list of AF Thresholds (1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.0)."
         )]
-        distribution_af: f64,
+        distribution_af: f32,
         #[structopt(
             long = "windowed-af",
             default_value = constants::MSI_DEFAULT_WINDOWED_AF,
             help = "Fixed AF threshold used for windowed heatmap MSI analysis \
                     (used by --plot-heatmap / --data-heatmap)."
         )]
-        windowed_af: f64,
+        windowed_af: f32,
         #[structopt(
             long,
             default_value = constants::MSI_DEFAULT_SLIDING_WINDOW_SIZE,
