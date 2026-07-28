@@ -75,7 +75,7 @@ pub(super) struct AfEvolutionResult {
     pub uncertainty_upper: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub map_std_dev: Option<f64>,
-    // Only computed if distribution output requested AND AF=0.0:
+    // Only computed if distribution output requested AND af_threshold == distribution_af:
     #[serde(skip_serializing_if = "Option::is_none")]
     pub distribution: Option<Vec<DpResult>>,
 }
@@ -88,7 +88,7 @@ pub(super) struct AfEvolutionResult {
 /// - Color:  posterior probability (`posterior_probability`)
 ///
 /// Produced by `run_windowed_analysis` when `--sliding-window` is specified.
-/// The fixed AF threshold used is configured via `--af-threshold-windowed`.
+/// The fixed AF threshold used is configured via `--windowed-af`.
 #[derive(Debug)]
 pub(super) struct WindowResult {
     /// Chromosome name.
