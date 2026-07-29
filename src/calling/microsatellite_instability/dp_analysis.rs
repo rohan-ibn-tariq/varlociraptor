@@ -873,7 +873,7 @@ pub(super) fn run_af_evolution_analysis(
 mod tests {
     use super::*;
 
-    use crate::utils::stats::test_constants::{TEST_EPSILON_F32, TEST_EPSILON};
+    use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_F32};
 
     /// Create a test Variant with given absence probability and allele frequency.
     fn make_variant(prob: f64, af: f32) -> Variant {
@@ -1247,14 +1247,8 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let result = calculate_msi_metrics(
-            &filtered,
-            100,
-            0.0,
-            "sample1".to_string(),
-            output_req,
-            0.05,
-        );
+        let result =
+            calculate_msi_metrics(&filtered, 100, 0.0, "sample1".to_string(), output_req, 0.05);
 
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
@@ -1277,14 +1271,8 @@ mod tests {
             needs_heatmap: false,
         };
 
-        let result = calculate_msi_metrics(
-            &filtered,
-            100,
-            0.5,
-            "sample1".to_string(),
-            output_req,
-            0.05,
-        );
+        let result =
+            calculate_msi_metrics(&filtered, 100, 0.5, "sample1".to_string(), output_req, 0.05);
         let lower = result.uncertainty_lower.unwrap();
         let upper = result.uncertainty_upper.unwrap();
         let std_dev: f64 = result.map_std_dev.unwrap();
@@ -1316,14 +1304,8 @@ mod tests {
         };
 
         // AF=0.0 should include distribution
-        let result_af0 = calculate_msi_metrics(
-            &filtered,
-            100,
-            0.0,
-            "sample1".to_string(),
-            output_req,
-            0.00,
-        );
+        let result_af0 =
+            calculate_msi_metrics(&filtered, 100, 0.0, "sample1".to_string(), output_req, 0.00);
         assert!(result_af0.distribution.is_some());
         let dist = result_af0.distribution.unwrap();
         assert_eq!(dist.len(), 2);
@@ -1333,14 +1315,8 @@ mod tests {
         assert_eq!(dist[1].k, 1);
 
         // AF=0.5 should NOT include distribution
-        let result_af5 = calculate_msi_metrics(
-            &filtered,
-            100,
-            0.5,
-            "sample1".to_string(),
-            output_req,
-            0.00,
-        );
+        let result_af5 =
+            calculate_msi_metrics(&filtered, 100, 0.5, "sample1".to_string(), output_req, 0.00);
         assert!(result_af5.distribution.is_none());
     }
 

@@ -724,9 +724,7 @@ pub(crate) mod tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::genomics::is_indel;
-    use crate::utils::stats::test_constants::{
-        TEST_EPSILON, TEST_EPSILON_F32, TEST_EPSILON_LOOSE
-    };
+    use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_F32, TEST_EPSILON_LOOSE};
 
     /// Encodes a single allele for the GT field in BCF format.
     ///
@@ -1199,10 +1197,12 @@ pub(crate) mod tests {
         let (_, header, record) = read_first_record(tmp_vcf.path());
 
         assert!(
-            (get_sample_af(&record, &header, 0, 0).unwrap().unwrap() - 0.75).abs() < TEST_EPSILON_F32
+            (get_sample_af(&record, &header, 0, 0).unwrap().unwrap() - 0.75).abs()
+                < TEST_EPSILON_F32
         );
         assert!(
-            (get_sample_af(&record, &header, 1, 0).unwrap().unwrap() - 0.25).abs() < TEST_EPSILON_F32
+            (get_sample_af(&record, &header, 1, 0).unwrap().unwrap() - 0.25).abs()
+                < TEST_EPSILON_F32
         );
     }
 
