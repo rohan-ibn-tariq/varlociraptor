@@ -448,7 +448,6 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
 /// # Arguments
 /// * `filtered` - Filtered view of variants passing AF threshold
 /// * `total_regions` - Total number of MS regions
-/// * `msi_high_threshold` - Threshold for MSI-High classification (e.g., 3.5%)
 /// * `af_threshold` - AF threshold used for filtering
 /// * `sample` - The sample being processed
 /// * `output_req` - Which outputs are requested (controls what to compute)
@@ -461,7 +460,6 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
 fn calculate_msi_metrics(
     filtered: &FilteredRegions,
     total_regions: usize,
-    msi_high_threshold: f64,
     af_threshold: f32,
     sample: String,
     output_req: OutputRequirements,
@@ -735,7 +733,6 @@ fn run_windowed_analysis(
 /// * `regions`            - Regions with variants from extraction
 /// * `total_regions`      - Total MS regions (denominator for MSI score)
 /// * `sample`             - Sample name
-/// * `msi_high_threshold` - Threshold for MSI-High classification (%)
 /// * `af_thresholds`      - AF thresholds to analyze in parallel
 /// * `distribution_af`    - Fixed AF forwarded to `calculate_msi_metrics` on each call
 ///                          marking which AF should populate the full distribution conditionally
@@ -747,7 +744,6 @@ fn run_global_analysis(
     regions: &[RegionSummary],
     total_regions: usize,
     sample: &str,
-    msi_high_threshold: f64,
     af_thresholds: &[f32],
     distribution_af: f32,
     output_req: OutputRequirements,
@@ -764,7 +760,6 @@ fn run_global_analysis(
         let result = calculate_msi_metrics(
             &filtered,
             total_regions,
-            msi_high_threshold,
             *af_threshold,
             sample.to_string(),
             output_req,
@@ -854,7 +849,6 @@ pub(super) fn run_af_evolution_analysis(
             regions,
             config.total_regions,
             config.sample,
-            config.msi_high_threshold,
             &config.af_thresholds,
             config.distribution_af,
             output_req,
@@ -1256,7 +1250,6 @@ mod tests {
         let result = calculate_msi_metrics(
             &filtered,
             100,
-            3.5,
             0.0,
             "sample1".to_string(),
             output_req,
@@ -1287,7 +1280,6 @@ mod tests {
         let result = calculate_msi_metrics(
             &filtered,
             100,
-            3.5,
             0.5,
             "sample1".to_string(),
             output_req,
@@ -1327,7 +1319,6 @@ mod tests {
         let result_af0 = calculate_msi_metrics(
             &filtered,
             100,
-            3.5,
             0.0,
             "sample1".to_string(),
             output_req,
@@ -1345,7 +1336,6 @@ mod tests {
         let result_af5 = calculate_msi_metrics(
             &filtered,
             100,
-            3.5,
             0.5,
             "sample1".to_string(),
             output_req,
@@ -1566,7 +1556,7 @@ mod tests {
             needs_distribution: false,
             needs_heatmap: false,
         };
-        let results = run_global_analysis(&regions, 100, "sample1", 3.5, &[0.0], 0.05, output_req);
+        let results = run_global_analysis(&regions, 100, "sample1", &[0.0], 0.05, output_req);
 
         assert_eq!(results.len(), 1);
         let r = &results["0.00"];
