@@ -735,7 +735,7 @@ fn run_windowed_analysis(
 /// * `sample`             - Sample name
 /// * `af_thresholds`      - AF thresholds to analyze in parallel
 /// * `distribution_af`    - Fixed AF forwarded to `calculate_msi_metrics` on each call
-///                          marking which AF should populate the full distribution conditionally
+///   marking which AF should populate the full distribution conditionally
 /// * `output_req`         - Which outputs to compute
 ///
 /// # Returns
@@ -790,8 +790,8 @@ fn run_global_analysis(
 /// # Arguments
 /// * `regions`    - Regions with variants from extraction
 /// * `config`     - Config items: total regions of interest, sample, msi threshold,
-///                  AF Thresholds for pseudotime analysis, fixed distribution/windowed AF values,
-///                  windowed heatmap window size and compute resource
+///   AF Thresholds for pseudotime analysis, fixed distribution/windowed AF values,
+///   windowed heatmap window size and compute resource
 /// * `output_req` - Which outputs requested (controls computation)
 ///
 /// # Note

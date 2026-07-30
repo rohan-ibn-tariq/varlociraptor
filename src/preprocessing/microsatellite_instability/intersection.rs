@@ -4,16 +4,16 @@
 //!
 //! This module provides:
 //! 1. `variant_overlaps_region` function to determine if a variant's indel overlaps a BED region,
-//!     accounting for VCF anchor bases and filtering out complex variants and SNVs.
+//!    accounting for VCF anchor bases and filtering out complex variants and SNVs.
 //! 2. `process_and_annotate` function as a core streaming algorithm for MSI preprocessing:
-//!     - Maintains a sliding window of VCF variants for memory efficiency
-//!     - Coordinates variant analysis (via variant_analysis module)
-//!     - Coordinates VCF output (via writer module)
-//!     - Returns processing statistics
+//!    - Maintains a sliding window of VCF variants for memory efficiency
+//!    - Coordinates variant analysis (via variant_analysis module)
+//!    - Coordinates VCF output (via writer module)
+//!    - Returns processing statistics
 //!
-//!     The streaming approach processes BED regions sequentially while maintaining
-//!     a sliding window of VCF variants, enabling memory-efficient analysis of
-//!     large datasets.
+//!    The streaming approach processes BED regions sequentially while maintaining
+//!    a sliding window of VCF variants, enabling memory-efficient analysis of
+//!    large datasets.
 //!
 //! Note: This module assumes that both the BED and VCF files are sorted by chromosome
 //! (lexicographically) and position, which is a common requirement for genomic analyses.
@@ -211,7 +211,7 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// * `bed_path` - Path to microsatellite regions BED file (format: chrom, start, end, NxMOTIF)
 /// * `writer` - Opened BCF writer for output
 /// * `aux_info_collector` - Collector for auxiliary INFO fields to propagate (used for keeping
-///    track of which INFO fields to copy from input to output)
+///   track of which INFO fields to copy from input to output)
 ///
 /// # Returns
 /// * `Ok(PreprocessingStats)` with processing statistics
