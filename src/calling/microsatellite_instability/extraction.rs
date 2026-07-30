@@ -52,12 +52,8 @@ pub(super) struct Variant {
 }
 
 /// All variants observed within one microsatellite region.
-///
-/// Region is identified by its `REGION_ID` string ("chrom:start-end").
 #[derive(Debug)]
 pub(super) struct RegionSummary {
-    /// Region identifier, format: "chrom:start-end"
-    pub region_id: String,
     /// Chromosome — used for window assignment in heatmap analysis.
     pub chrom: String,
     /// Region start (0-based) — used for window assignment in heatmap analysis.
@@ -104,7 +100,6 @@ impl RegionSummary {
         })?;
 
         Ok(RegionSummary {
-            region_id: region_id.to_string(),
             chrom: chrom.to_string(),
             start,
             variants: Vec::new(),
@@ -324,7 +319,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
-    use crate::utils::stats::test_constants::{TEST_EPSILON_LOOSE_F32, TEST_EPSILON_LOOSE};
+    use crate::utils::stats::test_constants::{TEST_EPSILON_LOOSE, TEST_EPSILON_LOOSE_F32};
 
     /* ====== Shared header builder =============== */
 
@@ -375,7 +370,6 @@ mod tests {
         let r = RegionSummary::from_region_id("chr1:1000-2000").unwrap();
         assert_eq!(r.chrom, "chr1");
         assert_eq!(r.start, 1000);
-        assert_eq!(r.region_id, "chr1:1000-2000");
         assert!(!r.has_real_indel);
         assert!(r.variants.is_empty());
     }
@@ -560,9 +554,12 @@ mod tests {
 
         let (regions, stats) = extract_somatic(&tmp);
         assert_eq!(stats.total_ms_regions, 3);
-        assert_eq!(regions[0].region_id, "chr1:1000-1030");
-        assert_eq!(regions[1].region_id, "chr1:2000-2030");
-        assert_eq!(regions[2].region_id, "chr2:500-530");
+        assert_eq!(regions[0].chrom, "chr1");
+        assert_eq!(regions[0].start, 1000);
+        assert_eq!(regions[1].chrom, "chr1");
+        assert_eq!(regions[1].start, 2000);
+        assert_eq!(regions[2].chrom, "chr2");
+        assert_eq!(regions[2].start, 500);
     }
 
     #[test]
@@ -590,9 +587,11 @@ mod tests {
 
         let (regions, stats) = extract_somatic(&tmp);
         assert_eq!(stats.total_ms_regions, 2);
-        assert_eq!(regions[0].region_id, "chr1:1000-1030");
+        assert_eq!(regions[0].chrom, "chr1");
+        assert_eq!(regions[0].start, 1000);
         assert_eq!(regions[0].variants.len(), 2);
-        assert_eq!(regions[1].region_id, "chr1:2000-2030");
+        assert_eq!(regions[1].chrom, "chr1");
+        assert_eq!(regions[1].start, 2000);
         assert_eq!(regions[1].variants.len(), 1);
     }
 
@@ -623,8 +622,10 @@ mod tests {
         assert_eq!(regions.len(), 2);
 
         // After sort by (chrom, start): chr1:992-1000 first
-        assert_eq!(regions[0].region_id, "chr1:992-1000");
-        assert_eq!(regions[1].region_id, "chr1:1001-1030");
+        assert_eq!(regions[0].chrom, "chr1");
+        assert_eq!(regions[0].start, 992);
+        assert_eq!(regions[1].chrom, "chr1");
+        assert_eq!(regions[1].start, 1001);
 
         assert_eq!(regions[0].variants.len(), 1);
         assert_eq!(regions[1].variants.len(), 1);
@@ -660,7 +661,8 @@ mod tests {
         let (regions, stats) = extract_somatic(&tmp);
         assert_eq!(stats.total_ms_regions, 1);
         assert_eq!(regions.len(), 1);
-        assert_eq!(regions[0].region_id, "chr1:1001-1030");
+        assert_eq!(regions[0].chrom, "chr1");
+        assert_eq!(regions[0].start, 1001);
         assert_eq!(regions[0].variants.len(), 1);
         assert!((regions[0].variants[0].prob_absent - 0.1).abs() < TEST_EPSILON_LOOSE);
     }

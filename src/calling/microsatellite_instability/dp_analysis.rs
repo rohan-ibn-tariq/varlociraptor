@@ -885,14 +885,12 @@ mod tests {
 
     /// Create a test RegionSummary with full control over all fields.
     fn make_region(
-        region_id: &str,
         chrom: &str,
         start: u64,
         variants: Vec<Variant>,
         has_real_indel: bool,
     ) -> RegionSummary {
         RegionSummary {
-            region_id: region_id.to_string(),
             chrom: chrom.to_string(),
             start,
             variants,
@@ -903,7 +901,7 @@ mod tests {
     /// Create a test RegionSummary with default location fields.
     /// Use when the test only cares about variants, not genomic position.
     fn make_region_simple(variants: Vec<Variant>) -> RegionSummary {
-        make_region("chr1:0-100", "chr1", 0, variants, true)
+        make_region("chr1", 0, variants, true)
     }
 
     /* ============ DP Core Tests ==================== */
@@ -1078,27 +1076,9 @@ mod tests {
     #[test]
     fn test_filter_multiple_regions_some_empty() {
         let regions = vec![
-            make_region(
-                "chr1:100-130",
-                "chr1",
-                100,
-                vec![make_variant(0.01, 0.8)],
-                true,
-            ),
-            make_region(
-                "chr1:200-230",
-                "chr1",
-                200,
-                vec![make_variant(0.02, 0.3)],
-                true,
-            ), // Filtered out
-            make_region(
-                "chr1:300-330",
-                "chr1",
-                300,
-                vec![make_variant(0.03, 0.9)],
-                true,
-            ),
+            make_region("chr1", 100, vec![make_variant(0.01, 0.8)], true),
+            make_region("chr1", 200, vec![make_variant(0.02, 0.3)], true), // Filtered out
+            make_region("chr1", 300, vec![make_variant(0.03, 0.9)], true),
         ];
 
         let filtered = filter_regions_by_af(&regions, 0.5);
@@ -1325,10 +1305,10 @@ mod tests {
     #[test]
     fn test_get_window_slice_basic() {
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100, vec![], true),
-            make_region("chr1:500-530", "chr1", 500, vec![], true),
-            make_region("chr1:1100-1130", "chr1", 1100, vec![], true),
-            make_region("chr2:100-130", "chr2", 100, vec![], true),
+            make_region("chr1", 100, vec![], true),
+            make_region("chr1", 500, vec![], true),
+            make_region("chr1", 1100, vec![], true),
+            make_region("chr2", 100, vec![], true),
         ];
         let slice = get_window_slice(&regions, "chr1", 0, 1000);
         assert_eq!(slice.len(), 2);
@@ -1346,14 +1326,14 @@ mod tests {
 
     #[test]
     fn test_get_window_slice_empty_window() {
-        let regions = vec![make_region("chr1:100-130", "chr1", 100, vec![], true)];
+        let regions = vec![make_region("chr1", 100, vec![], true)];
         let slice = get_window_slice(&regions, "chr1", 5000, 6000);
         assert_eq!(slice.len(), 0);
     }
 
     #[test]
     fn test_get_window_slice_chrom_not_found() {
-        let regions = vec![make_region("chr1:100-130", "chr1", 100, vec![], true)];
+        let regions = vec![make_region("chr1", 100, vec![], true)];
         let slice = get_window_slice(&regions, "chr99", 0, 1000);
         assert_eq!(slice.len(), 0);
     }
@@ -1361,8 +1341,8 @@ mod tests {
     #[test]
     fn test_get_window_slice_all_regions_in_window() {
         let regions = vec![
-            make_region("chr1:100-130", "chr1", 100, vec![], true),
-            make_region("chr1:200-230", "chr1", 200, vec![], true),
+            make_region("chr1", 100, vec![], true),
+            make_region("chr1", 200, vec![], true),
         ];
         let slice = get_window_slice(&regions, "chr1", 0, 1_000_000);
         assert_eq!(slice.len(), 2);
@@ -1371,9 +1351,9 @@ mod tests {
     #[test]
     fn test_get_window_slice_boundary_inclusive_exclusive() {
         let regions = vec![
-            make_region("chr1:0-30", "chr1", 0, vec![], true),
-            make_region("chr1:1000-1030", "chr1", 1000, vec![], true),
-            make_region("chr1:2000-2030", "chr1", 2000, vec![], true),
+            make_region("chr1", 0, vec![], true),
+            make_region("chr1", 1000, vec![], true),
+            make_region("chr1", 2000, vec![], true),
         ];
 
         // window_start is inclusive: region at exactly window_start=1000 included
@@ -1392,27 +1372,9 @@ mod tests {
     #[test]
     fn test_run_windowed_analysis_basic() {
         let regions = vec![
-            make_region(
-                "chr1:100-130",
-                "chr1",
-                100,
-                vec![make_variant(0.1, 0.8)],
-                true,
-            ),
-            make_region(
-                "chr1:200-230",
-                "chr1",
-                200,
-                vec![make_variant(0.2, 0.9)],
-                true,
-            ),
-            make_region(
-                "chr2:100-130",
-                "chr2",
-                100,
-                vec![make_variant(0.3, 0.7)],
-                true,
-            ),
+            make_region("chr1", 100, vec![make_variant(0.1, 0.8)], true),
+            make_region("chr1", 200, vec![make_variant(0.2, 0.9)], true),
+            make_region("chr2", 100, vec![make_variant(0.3, 0.7)], true),
         ];
         let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
 
@@ -1438,20 +1400,8 @@ mod tests {
     #[test]
     fn test_run_windowed_analysis_empty_window_excluded() {
         let regions = vec![
-            make_region(
-                "chr1:100-130",
-                "chr1",
-                100,
-                vec![make_variant(0.1, 0.8)],
-                true,
-            ),
-            make_region(
-                "chr1:5000100-5000130",
-                "chr1",
-                5_000_100,
-                vec![make_variant(0.2, 0.9)],
-                true,
-            ),
+            make_region("chr1", 100, vec![make_variant(0.1, 0.8)], true),
+            make_region("chr1", 5_000_100, vec![make_variant(0.2, 0.9)], true),
         ];
         let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
 
@@ -1470,13 +1420,7 @@ mod tests {
 
     #[test]
     fn test_run_windowed_analysis_zero_window_size() {
-        let regions = vec![make_region(
-            "chr1:100-130",
-            "chr1",
-            100,
-            vec![make_variant(0.1, 0.8)],
-            true,
-        )];
+        let regions = vec![make_region("chr1", 100, vec![make_variant(0.1, 0.8)], true)];
         let results = run_windowed_analysis(&regions, 0.1, 0);
         assert!(results.is_empty());
     }
@@ -1486,7 +1430,6 @@ mod tests {
         // All variants have af=0.05, below threshold 0.1 - filtered out
         // Region exists but no variants pass, msi_score=0, posterior=1.0
         let regions = vec![make_region(
-            "chr1:100-130",
             "chr1",
             100,
             vec![make_variant(0.1, 0.05)],
@@ -1503,20 +1446,8 @@ mod tests {
         // 2 regions in window, both unstable, k_map=2, score=2/2×100=100%
         // Windowed uses per-window denominator
         let regions = vec![
-            make_region(
-                "chr1:100-130",
-                "chr1",
-                100,
-                vec![make_variant(0.01, 0.8)],
-                true,
-            ),
-            make_region(
-                "chr1:200-230",
-                "chr1",
-                200,
-                vec![make_variant(0.01, 0.9)],
-                true,
-            ),
+            make_region("chr1", 100, vec![make_variant(0.01, 0.8)], true),
+            make_region("chr1", 200, vec![make_variant(0.01, 0.9)], true),
         ];
         let results = run_windowed_analysis(&regions, 0.0, 1_000_000);
         assert_eq!(results.len(), 1);
@@ -1591,20 +1522,8 @@ mod tests {
     #[test]
     fn test_run_af_evolution_analysis_multiple_af_thresholds() {
         let regions = vec![
-            make_region(
-                "chr1:100-130",
-                "chr1",
-                100,
-                vec![make_variant(0.1, 0.9)],
-                true,
-            ),
-            make_region(
-                "chr1:200-230",
-                "chr1",
-                200,
-                vec![make_variant(0.05, 0.5)],
-                true,
-            ),
+            make_region("chr1", 100, vec![make_variant(0.1, 0.9)], true),
+            make_region("chr1", 200, vec![make_variant(0.05, 0.5)], true),
         ];
 
         let output_req = OutputRequirements {
@@ -1693,20 +1612,8 @@ mod tests {
     #[test]
     fn test_run_af_evolution_analysis_heatmap_path() {
         let regions = vec![
-            make_region(
-                "chr1:100-130",
-                "chr1",
-                100,
-                vec![make_variant(0.1, 0.8)],
-                true,
-            ),
-            make_region(
-                "chr1:200-230",
-                "chr1",
-                200,
-                vec![make_variant(0.2, 0.9)],
-                true,
-            ),
+            make_region("chr1", 100, vec![make_variant(0.1, 0.8)], true),
+            make_region("chr1", 200, vec![make_variant(0.2, 0.9)], true),
         ];
 
         let output_req = OutputRequirements {
