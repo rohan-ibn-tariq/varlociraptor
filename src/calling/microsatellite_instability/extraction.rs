@@ -3,8 +3,8 @@
 //! VCF streaming and variant extraction for MSI calling.
 //!
 //! # This module provides:
-//!     1. Data Structures (`Variant`, `RegionSummary`, `ExtractionStats`)
-//!     2. Main Extraction (`extract_regions`)
+//! 1. Data Structures (`Variant`, `RegionSummary`, `ExtractionStats`)
+//! 2. Main Extraction (`extract_regions`)
 //!
 //! # Input Contract
 //! Input VCF must be the output of `varlociraptor preprocess msi` followed by
