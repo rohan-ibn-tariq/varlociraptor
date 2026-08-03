@@ -33,6 +33,14 @@
             "title": "Confidence",
             "scale": { "domain": [0, 1] }
         },
+        "stroke": {
+            "condition": {"test": "datum.msi_status === 'MSI-High'", "value": "#d62728"},
+            "value": null
+        },
+        "strokeWidth": {
+            "condition": {"test": "datum.msi_status === 'MSI-High'", "value": 1.5},
+            "value": 0
+        },
         "tooltip": [
             { "field": "chrom", "type": "nominal", "title": "Chromosome" },
             { "field": "window_start", "type": "quantitative", "title": "Window Start" },
