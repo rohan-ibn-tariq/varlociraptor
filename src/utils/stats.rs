@@ -47,8 +47,8 @@ pub(crate) fn phred_to_prob(phred: f64) -> f64 {
 /// * Returns 0.0 if denominator is zero (avoiding division by zero)
 ///
 /// # Precision
-/// Maintains exact precision for integers
-/// far exceeding f64's safe integer range of 2^53.
+/// Internally exact via `Decimal`, but the result is converted to `f64`
+/// before returning - the returned value has normal f64 precision.
 ///
 /// # Examples
 /// assert_eq!(calculate_percentage_exact(5, 100), 5.0);`

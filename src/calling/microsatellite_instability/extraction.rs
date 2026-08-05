@@ -149,7 +149,7 @@ impl ExtractionStats {
             self.total_ms_regions
         );
         info!("  - Regions with real indel:        {}", with_real);
-        info!("  - Regions with dummy indels:      {}", self.dummy_records);
+        info!("  - Regions needing a dummy indel:  {}", self.dummy_records);
         info!(
             "  - ALT alleles skipped (no AF):    {}",
             self.skipped_missing_af

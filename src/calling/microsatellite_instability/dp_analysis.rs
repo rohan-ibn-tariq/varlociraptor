@@ -1083,8 +1083,8 @@ mod tests {
 
         let filtered = filter_regions_by_af(&regions, 0.5);
         assert_eq!(filtered.len(), 2); // Only first and third
-        assert!(filtered.get_region(0)[0].af - 0.8 < TEST_EPSILON_F32);
-        assert!(filtered.get_region(1)[0].af - 0.9 < TEST_EPSILON_F32);
+        assert!((filtered.get_region(0)[0].af - 0.8).abs() < TEST_EPSILON_F32);
+        assert!((filtered.get_region(1)[0].af - 0.9).abs() < TEST_EPSILON_F32);
     }
 
     #[test]

@@ -447,7 +447,7 @@ pub enum PreprocessKind {
         about = "Preprocess Microsatellite Instability (MSI) candidate variants. [status: EXPERIMENTAL]",
         long_about = "Preprocess Microsatellite Instability (MSI) candidate variants with dummy indels and region annotation. [status: EXPERIMENTAL]",
         usage = "\tvarlociraptor preprocess msi microsatellite_regions.bed calls.vcf > enriched.vcf\n \
-                 \tvarlociraptor preprocess msi microsatellite_regions.bed calls.bcf --output_vcf enriched.vcf",
+                 \tvarlociraptor preprocess msi microsatellite_regions.bed calls.bcf --output enriched.vcf",
         setting = structopt::clap::AppSettings::ColoredHelp,
     )]
     MicrosatelliteInstability {
@@ -798,7 +798,7 @@ pub enum CallKind {
                  --sample HCT116 --events somatic_hct116 --threads 4 \
                  --msi-threshold 3.5 --plot-pseudotime msi-pseudotime.vl.json \
                  --data-pseudotime msi-pseudotime.tsv\n\n \
-                 varlociraptor estimate msi calls.bcf --sample HCT116 --events \
+                 varlociraptor call msi calls.bcf --sample HCT116 --events \
                  somatic_hct116 --msi-threshold 3.0 --plot-distribution \
                  msi-distribution.vl.json --data-distribution msi-distribution.tsv",
         setting = structopt::clap::AppSettings::ColoredHelp,

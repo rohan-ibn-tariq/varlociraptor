@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_indel_position_no_empty_ref_seq() {
+    fn test_calculate_indel_position_empty_ref_seq_yields_input_pos() {
         assert_eq!(calculate_indel_position(100, b"", b"TGC"), Some(100));
     }
 
