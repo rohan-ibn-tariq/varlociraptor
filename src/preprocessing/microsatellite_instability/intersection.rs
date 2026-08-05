@@ -265,7 +265,7 @@ pub(super) fn process_and_annotate(
                 WindowEntry::Real(_) if entry.chrom() < region.chrom.as_str() => true,
                 WindowEntry::Real(_) if entry.chrom() == region.chrom.as_str() => entry
                     .max_safe_pos()
-                    .map_or(true, |position| position < region.start),
+                    .is_none_or(|position| position < region.start),
                 _ => false,
             };
             if !ready {

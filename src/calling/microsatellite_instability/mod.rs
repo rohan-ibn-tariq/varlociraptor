@@ -124,7 +124,7 @@ impl MSIConfig {
         validate_required_vcf_fields_msi(&header)?;
 
         // --- sample ---
-        validate_samples_exist(&header, &[self.sample.clone()])?;
+        validate_samples_exist(&header, std::slice::from_ref(&self.sample))?;
 
         // --- events ---
         validate_events_exist(&header, &self.events)?;
