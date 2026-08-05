@@ -222,7 +222,7 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 pub(super) fn process_and_annotate(
     input_vcf: &mut bcf::Reader,
     bed_path: &Path,
-    mut writer: &mut bcf::Writer,
+    writer: &mut bcf::Writer,
     aux_info_collector: &AuxInfoCollector,
 ) -> Result<PreprocessingStats> {
     /* ========== Setup ========== */
@@ -273,9 +273,9 @@ pub(super) fn process_and_annotate(
             }
             match variant_window.pop_front().unwrap() {
                 WindowEntry::Real(variant) => {
-                    write_variant(&mut writer, variant, &mut total_annotated_indels)?
+                    write_variant(writer, variant, &mut total_annotated_indels)?
                 }
-                WindowEntry::Dummy(region) => inject_dummy_deletion(&mut writer, &region)?,
+                WindowEntry::Dummy(region) => inject_dummy_deletion(writer, &region)?,
             }
         }
 
@@ -382,9 +382,9 @@ pub(super) fn process_and_annotate(
     while let Some(entry) = variant_window.pop_front() {
         match entry {
             WindowEntry::Real(variant) => {
-                write_variant(&mut writer, variant, &mut total_annotated_indels)?
+                write_variant(writer, variant, &mut total_annotated_indels)?
             }
-            WindowEntry::Dummy(region) => inject_dummy_deletion(&mut writer, &region)?,
+            WindowEntry::Dummy(region) => inject_dummy_deletion(writer, &region)?,
         }
     }
 
