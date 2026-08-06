@@ -1,6 +1,6 @@
 {
     "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
-    "description": "MSI probability distribution at AF threshold 0.0.",
+    "description": "MSI probability distribution over the number of unstable microsatellite regions.",
     "title": "PLACEHOLDER_TITLE",
     "data": { "values": [] },
     "width": 500,

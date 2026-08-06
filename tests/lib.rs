@@ -909,21 +909,21 @@ fn test_call_msi_heatmap_basic() -> Result<()> {
         .collect();
     assert_eq!(rows.len(), 4, "3 chr1 windows + 1 chr2 window");
 
-    let region_sum: i32 = rows.iter().map(|r| r[6].parse::<i32>().unwrap()).sum();
+    let region_sum: i32 = rows.iter().map(|r| r[7].parse::<i32>().unwrap()).sum();
     assert_eq!(
         region_sum, 5,
         "every one of the 5 regions must land in exactly one window"
     );
 
-    assert_eq!(rows.iter().filter(|r| r[1] == "chr1").count(), 3);
-    assert_eq!(rows.iter().filter(|r| r[1] == "chr2").count(), 1);
+    assert_eq!(rows.iter().filter(|r| r[2] == "chr1").count(), 3);
+    assert_eq!(rows.iter().filter(|r| r[2] == "chr2").count(), 1);
 
     let dense_window = rows
         .iter()
-        .find(|r| r[1] == "chr1" && r[2] == "1000000")
+        .find(|r| r[2] == "chr1" && r[3] == "1000000")
         .expect("chr1 window starting at 1,000,000 should exist");
     assert_eq!(
-        dense_window[6], "2",
+        dense_window[7], "2",
         "two regions (1,000,100 and 1,500,100) share this window"
     );
 

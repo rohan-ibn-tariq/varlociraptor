@@ -119,6 +119,9 @@ fn write_plot(
         spec_obj["data"]["values"] = data;
         spec_obj["title"] = json!(title);
 
+        // This substitution depends on hardcoded template details (a "rule" mark,
+        // "MSI Threshold" text, a 3-value color list) - changing the templates
+        // can silently break the plotting without this code (or output) noticing.
         match plot_type {
             PlotType::WithThresholdLine => {
                 if let Some(layers) = spec_obj.get_mut("layer").and_then(|v| v.as_array_mut()) {
@@ -193,10 +196,10 @@ fn write_plot(
 /// # Output Format
 /// Tab-separated values with header:
 /// ```text
-/// sample  k   msi_score(threshold=3.5)    probability
-/// tumor   0   0.00    0.420000
-/// tumor   1   1.00    0.460000
-/// tumor   2   2.00    0.120000
+/// sample  distribution_af  k   msi_score(threshold=3.5)    probability
+/// tumor   0.00             0   0.00    0.420000
+/// tumor   0.00             1   1.00    0.460000
+/// tumor   0.00             2   2.00    0.120000
 /// ```
 ///
 /// # Arguments
@@ -212,7 +215,7 @@ fn write_plot(
 ///
 /// # Example
 /// ```ignore
-/// write_distribution_data(&results, "sample", Path::new("dist.tsv"), 3.5)?;
+/// write_distribution_data(&results, "sample", Path::new("dist.tsv"), 3.5, 0.0)?;
 /// ```
 pub(super) fn write_distribution_data(
     results: &HashMap<String, AfEvolutionResult>,
@@ -227,7 +230,7 @@ pub(super) fn write_distribution_data(
 
     writeln!(
         writer,
-        "sample\tk\tmsi_score(threshold={:.1})\tprobability",
+        "sample\tdistribution_af\tk\tmsi_score(threshold={:.1})\tprobability",
         msi_threshold
     )?;
 
@@ -235,8 +238,8 @@ pub(super) fn write_distribution_data(
         for dp_result in distribution {
             writeln!(
                 writer,
-                "{}\t{}\t{:.2}\t{:.12}",
-                sample, dp_result.k, dp_result.msi_score, dp_result.probability
+                "{}\t{:.2}\t{}\t{:.2}\t{:.12}",
+                sample, distribution_af, dp_result.k, dp_result.msi_score, dp_result.probability
             )?;
         }
     }
@@ -264,6 +267,7 @@ pub(super) fn write_distribution_data(
 /// * `sample`        - Sample name for plot title.
 /// * `path`          - Output JSON file path (Vega-Lite specification)
 /// * `msi_threshold` - MSI-High threshold for vertical line position
+/// * `distribution_af` - AF threshold this distribution was computed at
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -271,7 +275,7 @@ pub(super) fn write_distribution_data(
 ///
 /// # Example
 /// ```ignore
-/// generate_distribution_plot_spec(&results, "tumor", Path::new("dist.vl.json"), 3.5)?;
+/// generate_distribution_plot_spec(&results, "tumor", Path::new("dist.vl.json"), 3.5, 0.0)?;
 /// ```
 pub(super) fn generate_distribution_plot_spec(
     results: &HashMap<String, AfEvolutionResult>,
@@ -299,7 +303,10 @@ pub(super) fn generate_distribution_plot_spec(
         path,
         msi_threshold,
         PlotType::WithThresholdLine,
-        &format!("MSI Score Distribution — Sample: {}", sample),
+        &format!(
+            "MSI Score Distribution — Sample: {} (AF ≥ {:.2})",
+            sample, distribution_af
+        ),
     )?;
 
     Ok(())
@@ -492,8 +499,8 @@ pub(super) fn generate_pseudotime_plot_spec(
 ///
 /// # Output Format
 /// ```text
-/// sample  chrom  window_start  window_end  msi_score(threshold=3.5)  posterior_probability  regions_in_window  msi_status
-/// tumor   chr1   0             1000000     2.5000                    0.820000               40                 MSS
+/// sample  windowed_af  chrom  window_start  window_end  msi_score(threshold=3.5)  posterior_probability  regions_in_window  msi_status
+/// tumor   0.05         chr1   0             1000000     2.5000                    0.820000               40                 MSS
 /// ```
 ///
 /// # Arguments
@@ -501,6 +508,7 @@ pub(super) fn generate_pseudotime_plot_spec(
 /// * `sample`        - Sample name for the first column
 /// * `path`          - Output TSV file path
 /// * `msi_threshold` - MSI-High threshold for column header and classification
+/// * `windowed_af`   - Fixed AF threshold windowed analysis was computed at
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -508,28 +516,30 @@ pub(super) fn generate_pseudotime_plot_spec(
 ///
 /// # Example
 /// ```ignore
-/// write_heatmap_data(&results, "tumor", Path::new("heatmap.tsv"), 3.5)?;
+/// write_heatmap_data(&results, "tumor", Path::new("heatmap.tsv"), 3.5, 0.05)?;
 /// ```
 pub(super) fn write_heatmap_data(
     results: &[WindowResult],
     sample: &str,
     path: &Path,
     msi_threshold: f64,
+    windowed_af: f32,
 ) -> Result<()> {
     let file = File::create(path).context("Failed to create heatmap TSV")?;
     let mut writer = BufWriter::new(file);
 
     writeln!(
         writer,
-        "sample\tchrom\twindow_start\twindow_end\tmsi_score(threshold={:.1})\tposterior_probability\tregions_in_window\tmsi_status",
+        "sample\twindowed_af\tchrom\twindow_start\twindow_end\tmsi_score(threshold={:.1})\tposterior_probability\tregions_in_window\tmsi_status",
         msi_threshold
     )?;
 
     for r in results {
         writeln!(
             writer,
-            "{}\t{}\t{}\t{}\t{:.4}\t{:.6}\t{}\t{}",
+            "{}\t{:.2}\t{}\t{}\t{}\t{:.4}\t{:.6}\t{}\t{}",
             sample,
+            windowed_af,
             r.chrom,
             r.window_start,
             r.window_end,
@@ -562,6 +572,7 @@ pub(super) fn write_heatmap_data(
 /// * `sample`        - Sample name for title
 /// * `path`          - Output JSON file path
 /// * `msi_threshold` - MSI-High threshold for color scale midpoint and classification
+/// * `windowed_af`   - Fixed AF threshold windowed analysis was computed at
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -569,13 +580,14 @@ pub(super) fn write_heatmap_data(
 ///
 /// # Example
 /// ```ignore
-/// generate_heatmap_plot_spec(&results, "tumor", Path::new("heatmap.vl.json"), 3.5)?;
+/// generate_heatmap_plot_spec(&results, "tumor", Path::new("heatmap.vl.json"), 3.5, 0.05)?;
 /// ```
 pub(super) fn generate_heatmap_plot_spec(
     results: &[WindowResult],
     sample: &str,
     path: &Path,
     msi_threshold: f64,
+    windowed_af: f32,
 ) -> Result<()> {
     if results.is_empty() {
         return create_empty_plot(path, "No heatmap data!!");
@@ -602,7 +614,10 @@ pub(super) fn generate_heatmap_plot_spec(
         path,
         msi_threshold,
         PlotType::Heatmap,
-        &format!("MSI Spatial Heatmap — Sample: {}", sample),
+        &format!(
+            "MSI Spatial Heatmap — Sample: {} (AF ≥ {:.2})",
+            sample, windowed_af
+        ),
     )
 }
 
@@ -719,7 +734,7 @@ mod tests {
     #[test]
     fn test_write_heatmap_data_empty_writes_header_only() {
         let tmp = NamedTempFile::new().unwrap();
-        write_heatmap_data(&[], "tumor", tmp.path(), 3.5).unwrap();
+        write_heatmap_data(&[], "tumor", tmp.path(), 3.5, 0.05).unwrap();
 
         let content = fs::read_to_string(tmp.path()).unwrap();
         assert_eq!(content.lines().count(), 1); // header only
@@ -729,7 +744,7 @@ mod tests {
     #[test]
     fn test_write_heatmap_data_row_written() {
         let tmp = NamedTempFile::new().unwrap();
-        write_heatmap_data(&make_window_results(), "tumor", tmp.path(), 3.5).unwrap();
+        write_heatmap_data(&make_window_results(), "tumor", tmp.path(), 3.5, 0.05).unwrap();
 
         let content = fs::read_to_string(tmp.path()).unwrap();
         assert_eq!(content.lines().count(), 2); // header + one row
@@ -744,7 +759,7 @@ mod tests {
     #[test]
     fn test_generate_heatmap_plot_empty_produces_placeholder() {
         let tmp = NamedTempFile::new().unwrap();
-        generate_heatmap_plot_spec(&[], "tumor", tmp.path(), 3.5).unwrap();
+        generate_heatmap_plot_spec(&[], "tumor", tmp.path(), 3.5, 0.05).unwrap();
 
         let content = fs::read_to_string(tmp.path()).unwrap();
         assert!(serde_json::from_str::<Value>(&content).is_ok());

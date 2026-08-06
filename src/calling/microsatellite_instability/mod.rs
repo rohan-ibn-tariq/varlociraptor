@@ -309,7 +309,13 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
     }
 
     if let Some(ref path) = config.data_heatmap {
-        output::write_heatmap_data(&window_results, &config.sample, path, config.msi_threshold)?;
+        output::write_heatmap_data(
+            &window_results,
+            &config.sample,
+            path,
+            config.msi_threshold,
+            config.windowed_af,
+        )?;
     }
 
     if let Some(ref path) = config.plot_heatmap {
@@ -318,6 +324,7 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
             &config.sample,
             path,
             config.msi_threshold,
+            config.windowed_af,
         )?;
     }
 

@@ -453,12 +453,12 @@ pub enum PreprocessKind {
     MicrosatelliteInstability {
         #[structopt(
             parse(from_os_str),
-            help = "BED file (sorted) with microsatellite loci [chrom, start, end, name (format: <count>x<motif>)]."
+            help = "BED file, sorted by chromosome (lexicographic order) then position, with microsatellite loci [chrom, start, end, name (format: <count>x<motif>)]. Must match candidate_vcf's chromosome order."
         )]
         microsatellite_bed: PathBuf,
         #[structopt(
             parse(from_os_str),
-            help = "Candidate VCF/BCF (gzipped or uncompressed, sorted) file with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY)."
+            help = "Candidate VCF/BCF (gzipped or uncompressed), sorted by chromosome (lexicographic order) then position, with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY). Must match microsatellite_bed's chromosome order."
         )]
         candidate_vcf: PathBuf,
         #[structopt(
