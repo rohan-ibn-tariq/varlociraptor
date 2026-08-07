@@ -6,8 +6,16 @@
 //! **Note: This feature is experimental.**
 //!
 //! This module provides:
-//! 1. @TODO: A brief overview of the MSI calling workflow, e.g.:
-//! 2. Calculates MSI scores from enriched, called VCF/BCF for a single sample.
+//! Owns `MSIConfig` (CLI configuration) and `call_msi` (the entry point
+//! that orchestrates extraction, analysis, and output). Declares these
+//! child submodules:
+//! 1. `extraction`  - extracts MSI regions and their variant/dummy status
+//!    from the enriched, called VCF/BCF.
+//! 2. `dp_analysis` - runs dynamic-programming AF-evolution analysis
+//!    (global distribution/pseudotime, plus windowed heatmap analysis).
+//! 3. `output`      - writes TSV data files and Vega-Lite plot specs for
+//!    distribution, pseudotime, and heatmap outputs.
+//!
 
 mod dp_analysis;
 mod extraction;

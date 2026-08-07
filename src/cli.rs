@@ -1532,8 +1532,8 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     info!("----------------------------------------------");
                     info!("Step 0: Validating Files or CLI Arguments & Setting Defaults");
                     info!("----------------------------------------------");
-                    config.set_defaults()?;
                     config.validate()?;
+                    config.set_defaults()?;
 
                     /* Dispatch calling */
                     calling::microsatellite_instability::call_msi(config)?;

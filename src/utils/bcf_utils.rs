@@ -56,8 +56,6 @@ pub(crate) fn get_chrom(record: &bcf::Record, header: &HeaderView) -> Result<Str
         pos: record.pos() + 1,
     })?;
 
-    record.header();
-
     let chrom_bytes = header
         .rid2name(rid)
         .map_err(|_| Error::VcfRecordChromResolveFailed {
@@ -697,6 +695,10 @@ pub(crate) fn validate_required_vcf_fields_msi(header: &HeaderView) -> Result<()
 /// # Returns
 /// * `Ok(())` if file has at least one variant
 /// * `Err` if file is empty or read fails
+///
+/// # Note
+/// Advances the reader past the first record - reopen the file before
+/// further iteration.
 pub(crate) fn validate_vcf_file(vcf: &mut bcf::Reader) -> Result<()> {
     let header = vcf.header().clone();
 

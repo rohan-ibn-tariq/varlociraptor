@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use anyhow::Result;
-use log::info;
+use log::{info, warn};
 use rayon::prelude::*;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
@@ -304,7 +304,7 @@ fn setup_thread_pool(num_threads: Option<usize>) {
                 info!("Using {} threads (CLI specified)", threads);
             }
             Err(_) => {
-                info!(
+                warn!(
                     "Using {} threads (global pool already configured, requested {} ignored)",
                     rayon::current_num_threads(),
                     threads

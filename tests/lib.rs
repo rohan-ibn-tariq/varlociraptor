@@ -724,10 +724,10 @@ fn run_msi_call(
     basedir: &str,
     configure: impl FnOnce(&mut varlociraptor::MSIConfig),
 ) -> Result<()> {
-    let mut config = default_msi_call_config(&basedir);
+    let mut config = default_msi_call_config(basedir);
     configure(&mut config);
-    config.set_defaults()?;
     config.validate()?;
+    config.set_defaults()?;
     varlociraptor::call_msi(config)
 }
 

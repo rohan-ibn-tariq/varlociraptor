@@ -7,8 +7,17 @@
 //!
 //! **Note: This feature is experimental.**
 //!
-//! This module provides:
-//! 1. @TODO: A brief overview of the MSI preprocessing workflow, e.g.:
+//! Owns `PreprocessMSIConfig` (CLI configuration) and
+//! `preprocess_ms_candidates` (the entry point that orchestrates header,
+//! intersection, variant analysis, writer). Declares these child submodules:
+//! 1. `header`           - builds the output header: copies INFO field
+//!    declarations, adds REGION_ID/MSI_DUMMY.
+//! 2. `intersection`     - streams BED regions against VCF variants,
+//!    matching overlaps or flagging regions that need a dummy indel.
+//! 3. `writer`           - writes unannotated/annotated real variants and synthetic
+//!    dummy deletion records to the output file.
+//! 4. `variant_analysis` - classifies whether an indel is a perfect
+//!    tandem repeat of the BED region's motif.
 //!
 
 mod header;
@@ -44,7 +53,11 @@ pub struct PreprocessMSIConfig {
     pub microsatellite_bed: PathBuf,
     /// Path to candidate VCF/BCF file (sorted) with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY).
     pub candidate_vcf: PathBuf,
-    /// Output file path (VCF, BCF, or VCF.GZ; if omitted, writes BCF to STDOUT).
+    /// Output file path. Format/compression is inferred from the extension
+    /// - see `determine_output_format`'s doc for the full list. If omitted,
+    /// writes uncompressed VCF to STDOUT.
+    /// Note: output BCF/VCF.GZ is always compressed; there is currently no
+    /// option to request uncompressed BCF.
     pub output: Option<PathBuf>,
     /// List of INFO fields to propagate from the candidate VCF to the output.
     pub propagate_info_fields: Vec<String>,
@@ -72,7 +85,8 @@ impl PreprocessMSIConfig {
     /// Determine output format and compression from file extension.
     ///
     /// # Format Detection
-    /// - `.bcf` to BCF binary (always BGZF compressed)
+    /// - `.bcf` to BCF binary, compressed
+    /// - `.bcf.gz` to BCF binary, compressed - identical output to `.bcf`
     /// - `.vcf.gz` or `.vcf.bgz` to VCF text, BGZF compressed
     /// - `.vcf` to VCF text, uncompressed
     /// - Anything else to VCF text, uncompressed (safest default)
@@ -86,7 +100,8 @@ impl PreprocessMSIConfig {
             Some(path) => {
                 let path_str = path.to_string_lossy().to_lowercase();
 
-                if path_str.ends_with(".bcf") {
+                if path_str.ends_with(".bcf") || path_str.ends_with(".bcf.gz") {
+                    // .bcf.gz produces identical output to .bcf.
                     (Format::Bcf, false)
                 } else if path_str.ends_with(".vcf.gz") || path_str.ends_with(".vcf.bgz") {
                     (Format::Vcf, false)
