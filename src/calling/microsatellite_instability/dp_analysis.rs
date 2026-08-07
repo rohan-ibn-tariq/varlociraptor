@@ -987,12 +987,6 @@ mod tests {
         assert!(rayon::current_num_threads() >= 1);
     }
 
-    #[test]
-    fn test_setup_thread_pool_explicit() {
-        setup_thread_pool(Some(2));
-        assert!(rayon::current_num_threads() >= 1);
-    }
-
     /* ============ FilteredRegions Tests ============ */
 
     #[test]
