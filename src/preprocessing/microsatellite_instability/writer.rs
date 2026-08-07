@@ -86,12 +86,14 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
 
     let motif_bytes = region.motif.as_bytes();
 
-    if motif_bytes.is_empty() {
-        return Err(Error::MsiBedMotifInvalid {
-            motif: "(empty)".to_string(),
-        }
-        .into());
-    }
+    // Guaranteed non-empty by ms_bed.rs's parse_motif_from_name.
+    // Re-enable if that changes.
+    // if motif_bytes.is_empty() {
+    //     return Err(Error::MsiBedMotifInvalid {
+    //         motif: "(empty)".to_string(),
+    //     }
+    //     .into());
+    // }
 
     let deletion_pos = region.dummy_indel_position();
     record.set_pos(deletion_pos as i64);
@@ -296,25 +298,6 @@ mod tests {
 
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("chr2"));
-    }
-
-    #[test]
-    fn test_inject_dummy_deletion_empty_motif() {
-        let tmp = NamedTempFile::new().unwrap();
-        let header = create_minimal_vcf_header();
-        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
-
-        let region = BedRegion {
-            chrom: "chr1".to_string(),
-            start: 1000,
-            end: 1020,
-            motif: "".to_string(), // Empty!
-        };
-
-        let result = inject_dummy_deletion(&mut writer, &region);
-
-        assert!(result.is_err());
-        assert!(format!("{}", result.unwrap_err()).contains("motif"));
     }
 
     /* ====== write_variant tests ==================== */

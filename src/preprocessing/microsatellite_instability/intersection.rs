@@ -808,7 +808,7 @@ mod tests {
         // BED: chr1:94-106 4xCAG    (overlaps)
         //      chr1:100-121 7xCAG   (overlaps)
         //      chr1:150-158 8xA     (no overlap)
-        // Expected: 1 variant annotated with 2 region IDs, 1 dummy for chr1:150-158
+        // Expected: error - alt 0 overlaps both chr1:94-106 and chr1:100-121
 
         let tmp_vcf = create_minimal_vcf(
             &[br"##contig=<ID=chr1,length=1000000>"],
