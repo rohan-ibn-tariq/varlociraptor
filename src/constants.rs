@@ -47,7 +47,7 @@ pub(crate) const MIN_MSI_THRESHOLD: f64 = 0.0;
 /// different allele frequency cutoffs. Also, this list is used to validate
 /// the --distribution-af argument, as that needs to be from the list of
 /// AF Thresholds.
-pub(crate) const MSI_DEFAULT_AF_THRESHOLDS: &str = "1.0,0.8,0.6,0.4,0.2,0.1,0.05,0.02,0.0";
+pub(crate) const MSI_DEFAULT_AF_THRESHOLDS: &str = msi_default_af_thresholds!();
 
 /// INFO fields injected by MSI preprocessing output.
 /// Added to omit set to prevent double-writing via --propagate-info-fields.

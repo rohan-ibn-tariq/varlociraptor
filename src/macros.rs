@@ -31,4 +31,10 @@ macro_rules! preprocess_msi_omit_aux_info {
     };
 }
 
+#[macro_export]
+macro_rules! msi_default_af_thresholds {
+    () => {
+        "1.0,0.8,0.6,0.4,0.2,0.1,0.05,0.02,0.0"
+    };
+}
 /* ================================================= */

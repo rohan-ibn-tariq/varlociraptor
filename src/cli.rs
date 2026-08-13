@@ -790,7 +790,8 @@ pub enum CallKind {
         about = "Call Microsatellite Instability (MSI) for a sample. [status: EXPERIMENTAL]",
         long_about = "Call Microsatellite Instability (MSI) from variant calls at microsatellite loci. \
              Takes a sorted Varlociraptor-format VCF/BCF file, and produces \
-             either the MSI score distribution or MSI score evolution as Vega-Lite JSON output \
+             either the MSI score distribution or MSI score evolution across AF Thresholds, \
+             or a windowed genomic heatmap as Vega-Lite JSON output \
              file(s) or their TSV plot data file(s). [status: EXPERIMENTAL]",
         usage = "varlociraptor call microsatellite-instability calls.vcf \
                  --sample HCT116 --events somatic_hct116 --threads 4 \
@@ -804,7 +805,11 @@ pub enum CallKind {
     MicrosatelliteInstability {
         #[structopt(
             parse(from_os_str),
-            help = "VCF/BCF (gzipped or uncompressed) file with variant calls. This should come from varlociraptor preprocess msi, which adds dummy indels at microsatellite loci and annotates them with region information."
+            help = "VCF/BCF (gzipped or uncompressed) file with variant calls. Must be the \
+                    output of `varlociraptor preprocess msi` (adds dummy indels and \
+                    region id annotations at microsatellite loci) followed by \
+                    `varlociraptor call variants` (adds the INFO/PROB_* event \
+                    probability fields used by --events)."
         )]
         calls: PathBuf,
         #[structopt(long, required = true, help = "Sample to analyze.")]
@@ -833,9 +838,13 @@ pub enum CallKind {
         #[structopt(
             long = "distribution-af",
             default_value = constants::MSI_DEFAULT_DISTRIBUTION_AF,
-            help = "Fixed AF threshold at which to report the full MSI probability distribution \
+            help = concat!(
+                    "Fixed AF threshold at which to report the full MSI probability distribution \
                     (used by --plot-distribution / --data-distribution). Choose from the default \
-                    list of AF Thresholds (1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.0)."
+                    list of AF Thresholds (",
+                    msi_default_af_thresholds!(),
+                    ")."
+                   )
         )]
         distribution_af: f32,
         #[structopt(
@@ -876,9 +885,9 @@ pub enum CallKind {
         #[structopt(
             long,
             parse(from_os_str),
-            help = "Output path for heatmap plot (Vega-Lite JSON), showing MSI score \
-                    evolution across allele frequency thresholds in sliding windows \
-                    across the genome. \
+            help = "Output path for heatmap plot (Vega-Lite JSON), showing regional MSI \
+                    score across sliding genomic windows at a fixed AF threshold \
+                    (--windowed-af). \
                     Recommended: .vl.json extension."
         )]
         plot_heatmap: Option<PathBuf>,
@@ -900,9 +909,9 @@ pub enum CallKind {
         #[structopt(
             long,
             parse(from_os_str),
-            help = "Output path for windowed data (TSV), showing \
-                    MSI score evolution across allele frequency thresholds \
-                    in sliding windows across the genome. \
+            help = "Output path for windowed data (TSV), showing regional MSI score \
+                    across sliding genomic windows at a fixed AF threshold \
+                    (--windowed-af). \
                     Recommended: .tsv extension."
         )]
         data_heatmap: Option<PathBuf>,
