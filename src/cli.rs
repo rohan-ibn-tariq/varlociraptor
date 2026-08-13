@@ -17,7 +17,6 @@ use itertools::Itertools;
 use structopt::StructOpt;
 use strum::IntoEnumIterator;
 
-use crate::calling::microsatellite_instability as msi_calling;
 use crate::calling::variants::calling::{
     call_generic, CallWriter, DefaultCandidateFilter, SampleInfos,
 };
@@ -35,7 +34,6 @@ use crate::{calling, constants};
 use crate::filtration;
 use crate::grammar;
 use crate::preprocessing;
-use crate::preprocessing::microsatellite_instability as msi_preprocessing;
 use crate::reference;
 use crate::testcase;
 use crate::utils::PathMap;
@@ -1266,7 +1264,7 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     info!("==============================================");
 
                     /* Set up preprocessing configuration */
-                    let config = msi_preprocessing::PreprocessMSIConfig {
+                    let config = preprocessing::microsatellite_instability::PreprocessMSIConfig {
                         microsatellite_bed,
                         candidate_vcf,
                         output,
@@ -1509,7 +1507,7 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     info!("==============================================");
 
                     /* Set up calling configuration */
-                    let mut config = msi_calling::MSIConfig {
+                    let mut config = calling::microsatellite_instability::MSIConfig {
                         calls,
                         threads,
                         msi_threshold,

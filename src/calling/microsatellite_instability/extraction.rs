@@ -225,11 +225,9 @@ pub(super) fn extract_regions(
 
         // Extract one Variant per ALT allele.
         let allele_count = record.allele_count() as usize;
+        let region_ids = get_info_strings(&record, MSI_REGION_ID_TAG).unwrap_or_default();
         for alt_idx in 0..allele_count.saturating_sub(1) {
-            let region_id = match get_info_strings(&record, MSI_REGION_ID_TAG)
-                .and_then(|v| v.into_iter().nth(alt_idx))
-                .filter(|s| s != ".")
-            {
+            let region_id = match region_ids.get(alt_idx).filter(|s| *s != ".").cloned() {
                 Some(id) => id,
                 None => {
                     debug!(

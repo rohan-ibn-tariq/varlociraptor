@@ -728,23 +728,6 @@ pub(crate) mod tests {
     use crate::utils::genomics::is_indel;
     use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_F32, TEST_EPSILON_LOOSE};
 
-    /// Encodes a single allele for the GT field in BCF format.
-    ///
-    /// BCF stores each allele as: (allele_index + 1) << 1 | phased_bit
-    /// - allele_index: -1 for missing, 0 for REF, 1 for ALT1, etc.
-    /// - phased_bit: 1 for phased ('|'), 0 for unphased ('/')
-    ///
-    /// Example:
-    ///   encode_genotype_allele(0, false) -> 2   // allele 0, unphased
-    ///
-    /// A full genotype like "0/0" would be encoded as: [2, 2]
-    ///
-    /// Reference: https://samtools.github.io/hts-specs/BCFv2_qref.pdf
-    pub(crate) fn encode_genotype_allele(allele_index: i32, phased: bool) -> i32 {
-        let phased_flag = if phased { 1 } else { 0 };
-        (allele_index + 1) * 2 | phased_flag
-    }
-
     /// Configuration for test VCF creation
     pub(crate) struct TestVcfConfig<'a> {
         pub ref_allele: &'a [u8],
@@ -942,8 +925,8 @@ pub(crate) mod tests {
         // GT
         let mut genotypes = Vec::new();
         for _ in 0..config.num_samples {
-            genotypes.push(encode_genotype_allele(0, false));
-            genotypes.push(encode_genotype_allele(1, false));
+            genotypes.push(i32::from(bcf::record::GenotypeAllele::Unphased(0)));
+            genotypes.push(i32::from(bcf::record::GenotypeAllele::Unphased(1)));
         }
         rec.push_format_integer(b"GT", &genotypes).unwrap();
 

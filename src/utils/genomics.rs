@@ -168,14 +168,9 @@ pub(crate) fn calculate_indel_position(pos: u64, ref_seq: &[u8], alt_seq: &[u8])
 
 /// Calculate structural variant length (SVLEN) from reference and alternate sequences.
 ///
-/// Implements anchor-aware SVLEN calculation by identifying the common prefix
-/// between reference and alternate alleles (the "anchor"), then computing the
-/// difference in non-anchor sequence lengths.
-///
-/// # Algorithm
-/// 1. Find longest common prefix (anchor) between REF and ALT
-/// 2. Calculate tail lengths after anchor for both sequences
-/// 3. Return: alt_tail - ref_tail = alt_len - ref_len
+/// Returns the length difference between the alternate and reference alleles.
+/// The shared prefix (anchor) cancels out of the subtraction, so the result
+/// is simply `alt_len - ref_len`.
 ///
 /// # Arguments
 /// * `ref_seq` - Reference allele sequence
@@ -186,24 +181,13 @@ pub(crate) fn calculate_indel_position(pos: u64, ref_seq: &[u8], alt_seq: &[u8])
 /// * Negative value - Deletion (REF longer than ALT)
 /// * Zero - Same length (likely SNV or MNV)
 ///
-/// # Note
-/// Anchor-aware: calculates length difference ignoring common prefix (anchor).
-/// Handles empty sequences (start or end of sequence) gracefully.
-///
 /// # Examples
 /// Insertion: REF=ACAG, ALT=ACAGCAG : +3
 /// assert_eq!(calculate_dynamic_svlen(b"ACAG", b"ACAGCAG"), 3);
 /// Deletion: REF=ACAGT, ALT=AC : -3  
 /// assert_eq!(calculate_dynamic_svlen(b"ACAGT", b"AC"), -3);
 pub(crate) fn calculate_dynamic_svlen(ref_seq: &[u8], alt_seq: &[u8]) -> i32 {
-    // Find anchor length (longest common prefix)
-    let anchor_len = calculate_anchor_length(ref_seq, alt_seq);
-
-    // Calculate length difference after anchor
-    let ref_tail = ref_seq.len() - anchor_len;
-    let alt_tail = alt_seq.len() - anchor_len;
-
-    alt_tail as i32 - ref_tail as i32
+    alt_seq.len() as i32 - ref_seq.len() as i32
 }
 
 /// Classify MSI status based on score and threshold.

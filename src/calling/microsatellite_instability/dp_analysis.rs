@@ -471,67 +471,69 @@ fn calculate_msi_metrics(
     // Step 2: Run DP to get probability distribution
     let distribution_raw = run_dp_for_regions(filtered);
 
-    // Step 3: Compute k_map, msi_score_map, regions_with_variants ONLY if pseudotime needed
-    let (k_map, msi_score_map, regions_with_variants) = if output_req.needs_pseudotime
-        && total_regions > 0
-    {
+    // Steps 3 & 4: Compute k_map/msi_score_map/regions_with_variants and the
+    // uncertainty bounds together, ONLY if pseudotime is needed.
+    let (
+        k_map,
+        msi_score_map,
+        regions_with_variants,
+        uncertainty_lower,
+        uncertainty_upper,
+        map_std_dev,
+    ) = if output_req.needs_pseudotime && total_regions > 0 {
         let (k_map_raw, msi_score_map_raw, _) = find_map_estimate(&distribution_raw, total_regions);
         let regions_with_variants_count = filtered.len();
+
+        let k_map_decimal = Decimal::from(k_map_raw);
+
+        // Calculate variance: Var(K) = Σ[(k - k_map)² × P(k)]
+        let variance_decimal: Decimal = distribution_raw
+            .iter()
+            .enumerate()
+            .map(|(k, &prob)| {
+                let k_decimal = Decimal::from(k);
+                let diff = k_decimal - k_map_decimal;
+                let diff_squared = diff * diff;
+                let prob_decimal = Decimal::from_f64_retain(prob).unwrap_or(Decimal::from(0));
+                diff_squared * prob_decimal
+            })
+            .sum();
+
+        // Calculate standard deviation
+        let std_dev_decimal = variance_decimal.sqrt().unwrap_or(Decimal::from(0));
+
+        // Get confidence bounds
+        let total_decimal = Decimal::from(total_regions);
+        let hundred = Decimal::from(100);
+        let zero = Decimal::from(0);
+
+        let lower_k_decimal = (k_map_decimal - std_dev_decimal).max(zero);
+        let upper_k_decimal = (k_map_decimal + std_dev_decimal).min(total_decimal);
+        let lower_percentage_decimal = (lower_k_decimal / total_decimal) * hundred;
+        let upper_percentage_decimal = (upper_k_decimal / total_decimal) * hundred;
+        let lower = lower_percentage_decimal
+            .max(zero)
+            .min(hundred)
+            .to_f64()
+            .unwrap_or(0.0);
+        let upper = upper_percentage_decimal
+            .max(zero)
+            .min(hundred)
+            .to_f64()
+            .unwrap_or(0.0);
+        let std_dev_f64 = std_dev_decimal.to_f64().unwrap_or(0.0);
+
         (
             Some(k_map_raw),
             Some(msi_score_map_raw),
             Some(regions_with_variants_count),
+            Some(lower),
+            Some(upper),
+            Some(std_dev_f64),
         )
     } else {
-        (None, None, None)
+        (None, None, None, None, None, None)
     };
-
-    // Step 4: Calculate uncertainty using exact Decimal arithmetic
-    let (uncertainty_lower, uncertainty_upper, map_std_dev) =
-        if output_req.needs_pseudotime && total_regions > 0 {
-            let k_map_decimal = Decimal::from(k_map.unwrap());
-
-            // Calculate variance: Var(K) = Σ[(k - k_map)² × P(k)]
-            let variance_decimal: Decimal = distribution_raw
-                .iter()
-                .enumerate()
-                .map(|(k, &prob)| {
-                    let k_decimal = Decimal::from(k);
-                    let diff = k_decimal - k_map_decimal;
-                    let diff_squared = diff * diff;
-                    let prob_decimal = Decimal::from_f64_retain(prob).unwrap_or(Decimal::from(0));
-                    diff_squared * prob_decimal
-                })
-                .sum();
-
-            // Calculate standard deviation
-            let std_dev_decimal = variance_decimal.sqrt().unwrap_or(Decimal::from(0));
-
-            // Get confidence bounds
-            let total_decimal = Decimal::from(total_regions);
-            let hundred = Decimal::from(100);
-            let zero = Decimal::from(0);
-
-            let lower_k_decimal = (k_map_decimal - std_dev_decimal).max(zero);
-            let upper_k_decimal = (k_map_decimal + std_dev_decimal).min(total_decimal);
-            let lower_percentage_decimal = (lower_k_decimal / total_decimal) * hundred;
-            let upper_percentage_decimal = (upper_k_decimal / total_decimal) * hundred;
-            let lower = lower_percentage_decimal
-                .max(zero)
-                .min(hundred)
-                .to_f64()
-                .unwrap_or(0.0);
-            let upper = upper_percentage_decimal
-                .max(zero)
-                .min(hundred)
-                .to_f64()
-                .unwrap_or(0.0);
-            let std_dev_f64 = std_dev_decimal.to_f64().unwrap_or(0.0);
-
-            (Some(lower), Some(upper), Some(std_dev_f64))
-        } else {
-            (None, None, None)
-        };
 
     // Step 5: Create full distribution (only if distribution output requested
     // AND current AF threshold matches distribution_af)
