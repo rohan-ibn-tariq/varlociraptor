@@ -22,7 +22,7 @@ use crate::errors::Error;
 ///
 /// Represents a genomic region containing a microsatellite repeat,
 /// parsed from BED format with motif information in the name field.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct BedRegion {
     pub chrom: String,
     pub start: u64,

@@ -373,7 +373,7 @@ pub(super) fn process_and_annotate(
                         || (e.chrom() == region.chrom.as_str() && e.pos() > dummy_pos)
                 })
                 .unwrap_or(variant_window.len());
-            variant_window.insert(insert_at, WindowEntry::Dummy(region.clone()));
+            variant_window.insert(insert_at, WindowEntry::Dummy(region));
             total_dummy_indels += 1;
         }
     }
