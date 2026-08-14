@@ -340,7 +340,7 @@ pub(super) fn process_and_annotate(
             }
 
             let allele_count = variant_info.record.allele_count() as usize;
-            for alt_idx in 0..(allele_count - 1) {
+            for alt_idx in 0..allele_count.saturating_sub(1) {
                 if !variant_overlaps_region(&variant_info.record, &region, alt_idx) {
                     continue;
                 }

@@ -154,7 +154,11 @@ pub(crate) fn parse_bed_record(record: &bed::Record) -> Result<BedRegion> {
 
     if start >= end {
         return Err(Error::BedRecordInvalid {
-            chrom: chrom.clone(),
+            chrom,
+            // Note: `start as i64` casts an unsigned u64 to a signed i64.
+            // In practice this is safe generally for real genomic coordinates, but it's
+            // technically not infallible - if `start` ever exceeded i64::MAX,
+            // the cast would wrap into a negative number rather than erroring.
             pos: start as i64,
             msg: "Invalid region coordinates: start >= end".to_string(),
         }
@@ -236,14 +240,16 @@ pub(crate) fn validate_bed_file(bed_path: &Path) -> Result<()> {
         Some(Err(e)) => Err(e).context("Failed to read first BED record"),
         Some(Ok(record)) => {
             let first_region = parse_bed_record(&record)?;
+            if !first_region.is_valid_motif() {
+                return Err(Error::MsiBedMotifInvalid {
+                    motif: first_region.motif,
+                }
+                .into());
+            }
+
             info!(
-                "  - First region: ({} {}-{} {}x{}) valid-motif={}",
-                first_region.chrom,
-                first_region.start,
-                first_region.end,
-                first_region.motif_length(),
-                first_region.motif,
-                first_region.is_valid_motif(),
+                "  - First region: ({} {}-{} motif={}) valid-motif=true",
+                first_region.chrom, first_region.start, first_region.end, first_region.motif,
             );
             info!("  - BED file validated successfully");
             Ok(())

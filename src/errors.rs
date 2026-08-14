@@ -244,7 +244,9 @@ pub(crate) enum Error {
     MsiConfigOutputMissing,
     /* -------------------- BED File Errors -------------------------- */
     #[error(
-        "invalid motif format in BED record: expected 'NxMOTIF' (e.g., '15xCAG'), got '{motif}'"
+        "invalid microsatellite motif specification '{motif}' in BED record - expected \
+        format 'NxMOTIF' with a 1-6 base motif of unambiguous bases only \
+        (A/C/G/T, no N or other ambiguity codes), e.g. '15xCAG'"
     )]
     MsiBedMotifInvalid { motif: String },
     #[error("BED record missing required name field (4th column) containing motif information")]
