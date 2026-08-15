@@ -359,7 +359,9 @@ pub fn record_has_info_string(record: &bcf::Record, field: &[u8]) -> bool {
 ///
 /// # Returns
 /// * `Some(Vec<String>)` - All values if field present
-/// * `None` - If field is absent or any value is not valid UTF-8
+/// * `None` - If field is absent
+/// * Panics if a present value is not valid UTF-8 - callers should only use
+///   this on fields where UTF-8 validity is guaranteed by construction.
 ///
 /// # Example
 /// assert_eq!(get_info_strings(&record, b"REGION_ID").unwrap(), vec!["chr1:100-130".to_string()]);
