@@ -376,6 +376,18 @@ pub(super) fn write_pseudotime_data(
             None => continue,
         };
 
+        let msi_score_str = result
+            .msi_score_map
+            .map(|v| format!("{:.2}", v))
+            .unwrap_or_else(|| "NA".to_string());
+        let k_map_str = result
+            .k_map
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "NA".to_string());
+        let regions_str = result
+            .regions_with_variants
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "NA".to_string());
         let lower = result
             .uncertainty_lower
             .map(|v| format!("{:.4}", v))
@@ -391,12 +403,12 @@ pub(super) fn write_pseudotime_data(
 
         writeln!(
             writer,
-            "{}\t{:.2}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             sample,
             af_f32,
-            result.msi_score_map.unwrap_or(0.0),
-            result.k_map.unwrap_or(0),
-            result.regions_with_variants.unwrap_or(0),
+            msi_score_str,
+            k_map_str,
+            regions_str,
             result
                 .msi_score_map
                 .map(|s| classify_msi_status(s, msi_threshold))
@@ -469,7 +481,11 @@ pub(super) fn generate_pseudotime_plot_spec(
             None => continue,
         };
 
-        let msi_score = result.msi_score_map.unwrap_or(0.0);
+        let msi_score = match result.msi_score_map {
+            Some(v) => v,
+            None => continue, // no computed score for this AF threshold - skip the point
+        };
+
         data.push(json!({
             "af_threshold": af_f32,
             "msi_score": msi_score,
