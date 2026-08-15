@@ -480,7 +480,7 @@ fn calculate_msi_metrics(
         uncertainty_lower,
         uncertainty_upper,
         map_std_dev,
-    ) = if output_req.needs_pseudotime && total_regions > 0 {
+    ) = if output_req.needs_pseudotime {
         let (k_map_raw, msi_score_map_raw, _) = find_map_estimate(&distribution_raw, total_regions);
         let regions_with_variants_count = filtered.len();
 
