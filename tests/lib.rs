@@ -971,7 +971,7 @@ fn test_call_msi_heatmap_basic() -> Result<()> {
 
 #[test]
 fn test_call_msi_all_outputs_together() -> Result<()> {
-    let basedir = basedir("test_call_msi_heatmap_basic");
+    let basedir = basedir("test_call_msi_all_outputs");
     let files = [
         format!("{}/combo_dist.tsv", basedir),
         format!("{}/combo_dist.vl.json", basedir),
