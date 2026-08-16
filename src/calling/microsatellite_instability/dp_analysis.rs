@@ -599,22 +599,11 @@ fn get_window_slice<'a>(
     window_start: u64,
     window_end: u64,
 ) -> &'a [RegionSummary] {
-    // Find first index where chrom matches and start >= window_start
-    let start_idx = regions
-        .iter()
-        .position(|r| r.chrom == chrom && r.start >= window_start);
-
-    let start_idx = match start_idx {
-        Some(i) => i,
-        None => return &[],
-    };
-
-    // Find end index where chrom still matches and start < window_end
-    let end_idx = regions[start_idx..]
-        .iter()
-        .position(|r| r.chrom != chrom || r.start >= window_end)
-        .map(|i| start_idx + i)
-        .unwrap_or(regions.len());
+    let start_idx =
+        regions.partition_point(|r| (r.chrom.as_str(), r.start) < (chrom, window_start));
+    let end_idx = start_idx
+        + regions[start_idx..]
+            .partition_point(|r| (r.chrom.as_str(), r.start) < (chrom, window_end));
 
     &regions[start_idx..end_idx]
 }
@@ -1304,6 +1293,7 @@ mod tests {
             make_region("chr1", 100, vec![], true),
             make_region("chr1", 500, vec![], true),
             make_region("chr1", 1100, vec![], true),
+            make_region("chr10", 10, vec![], true),
             make_region("chr2", 100, vec![], true),
         ];
         let slice = get_window_slice(&regions, "chr1", 0, 1000);
@@ -1318,13 +1308,42 @@ mod tests {
         let slice = get_window_slice(&regions, "chr2", 0, 1000);
         assert_eq!(slice.len(), 1);
         assert_eq!(slice[0].start, 100);
+
+        let slice = get_window_slice(&regions, "chr10", 0, 100);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].chrom, "chr10");
+        assert_eq!(slice[0].start, 10);
     }
 
     #[test]
     fn test_get_window_slice_empty_window() {
-        let regions = vec![make_region("chr1", 100, vec![], true)];
+        let regions = vec![
+            make_region("chr1", 100, vec![], true),
+            make_region("chr1", 300, vec![], true),
+            make_region("chr10", 10, vec![], true),
+            make_region("chr2", 100, vec![], true),
+        ];
+
+        // Window entirely after all data on the queried chrom
         let slice = get_window_slice(&regions, "chr1", 5000, 6000);
-        assert_eq!(slice.len(), 0);
+        assert_eq!(slice.len(), 0, "window after all data should be empty");
+
+        // Window entirely before all data on the queried chrom
+        let slice = get_window_slice(&regions, "chr1", 0, 50);
+        assert_eq!(slice.len(), 0, "window before all data should be empty");
+
+        // Window in a numeric gap between two regions on the same chrom
+        let slice = get_window_slice(&regions, "chr1", 150, 250);
+        assert_eq!(slice.len(), 0, "window in a numeric gap should be empty");
+
+        // Chromosome missing, but sorting in the middle of the array
+        // "chr15" sorts between "chr10" and "chr2" lexicographically.
+        let slice = get_window_slice(&regions, "chr15", 0, 1000);
+        assert_eq!(
+            slice.len(),
+            0,
+            "chrom missing from the middle of the sort order should be empty"
+        );
     }
 
     #[test]
