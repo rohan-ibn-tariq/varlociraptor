@@ -728,6 +728,41 @@ mod tests {
         assert!(first_row.contains("0.6")); // probability k=0
     }
 
+    #[test]
+    fn test_generate_distribution_plot_threshold_injected() {
+        let tmp = NamedTempFile::new().unwrap();
+        generate_distribution_plot_spec(&make_distribution_result(), "tumor", tmp.path(), 7.5, 0.0)
+            .unwrap();
+
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        let spec: Value = serde_json::from_str(&content).unwrap();
+
+        let layers = spec["layer"].as_array().expect("plot should have layers");
+
+        let threshold_layers: Vec<&Value> = layers
+            .iter()
+            .filter(|layer| {
+                let mark_type = layer["mark"]["type"].as_str();
+                mark_type == Some("rule")
+                    || layer["encoding"]["text"]["value"].as_str() == Some("MSI Threshold")
+            })
+            .collect();
+
+        assert_eq!(
+            threshold_layers.len(),
+            2,
+            "expected both the rule layer and the text layer to match"
+        );
+
+        for layer in &threshold_layers {
+            assert_eq!(
+                layer["encoding"]["x"]["datum"].as_f64(),
+                Some(7.5),
+                "every threshold layer's x.datum should be updated"
+            );
+        }
+    }
+
     /* ====== Pseudotime TSV ===================== */
 
     #[test]
@@ -743,6 +778,40 @@ mod tests {
         assert!(row.contains("0.00")); // af_threshold
         assert!(row.contains("2.00")); // msi_score
         assert!(row.contains("MSS")); // MSI status
+    }
+
+    #[test]
+    fn test_generate_pseudotime_plot_threshold_injected() {
+        let tmp = NamedTempFile::new().unwrap();
+        generate_pseudotime_plot_spec(&make_pseudotime_result(), "tumor", tmp.path(), 7.5).unwrap();
+
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        let spec: Value = serde_json::from_str(&content).unwrap();
+
+        let layers = spec["layer"].as_array().expect("plot should have layers");
+
+        let threshold_layers: Vec<&Value> = layers
+            .iter()
+            .filter(|layer| {
+                let mark_type = layer["mark"]["type"].as_str();
+                mark_type == Some("rule")
+                    || layer["encoding"]["text"]["value"].as_str() == Some("MSI Threshold")
+            })
+            .collect();
+
+        assert_eq!(
+            threshold_layers.len(),
+            2,
+            "expected both the rule layer and the text layer to match"
+        );
+
+        for layer in &threshold_layers {
+            assert_eq!(
+                layer["encoding"]["y"]["datum"].as_f64(),
+                Some(7.5),
+                "every threshold layer's y.datum should be updated"
+            );
+        }
     }
 
     /* ====== Heatmap TSV ======================== */
@@ -770,6 +839,26 @@ mod tests {
         assert!(row.contains("chr1"));
         assert!(row.contains("MSS")); // MSI status
         assert!(row.contains("0.8000")); // posterior
+    }
+
+    #[test]
+    fn test_generate_heatmap_plot_threshold_injected() {
+        let tmp = NamedTempFile::new().unwrap();
+        generate_heatmap_plot_spec(&make_window_results(), "tumor", tmp.path(), 7.5, 0.05).unwrap();
+
+        let content = fs::read_to_string(tmp.path()).unwrap();
+        let spec: Value = serde_json::from_str(&content).unwrap();
+
+        let domain = spec["encoding"]["color"]["scale"]["domain"]
+            .as_array()
+            .expect("heatmap should have a color domain");
+
+        assert_eq!(domain.len(), 3);
+        assert_eq!(
+            domain[1].as_f64(),
+            Some(7.5),
+            "threshold should replace domain[1]"
+        );
     }
 
     #[test]
