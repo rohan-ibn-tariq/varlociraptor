@@ -17,7 +17,6 @@
 //!
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use anyhow::Result;
 use log::{info, warn};
@@ -672,35 +671,34 @@ fn run_windowed_analysis(
         chroms.len()
     );
 
-    let results = Mutex::new(Vec::new());
+    let mut all_results: Vec<WindowResult> = work_items
+        .par_iter()
+        .filter_map(|&(chrom, window_start)| {
+            let window_end = window_start + window_size;
 
-    work_items.par_iter().for_each(|&(chrom, window_start)| {
-        let window_end = window_start + window_size;
+            // Zero-copy sub-slice for this window
+            let window_slice = get_window_slice(regions, chrom, window_start, window_end);
+            if window_slice.is_empty() {
+                return None;
+            }
 
-        // Zero-copy sub-slice for this window
-        let window_slice = get_window_slice(regions, chrom, window_start, window_end);
-        if window_slice.is_empty() {
-            return;
-        }
+            let regions_in_window = window_slice.len();
 
-        let regions_in_window = window_slice.len();
+            let filtered = filter_regions_by_af(window_slice, af_threshold);
 
-        let filtered = filter_regions_by_af(window_slice, af_threshold);
+            let dist = run_dp_for_regions(&filtered);
+            let (_, msi_score, posterior_probability) = find_map_estimate(&dist, regions_in_window);
 
-        let dist = run_dp_for_regions(&filtered);
-        let (_, msi_score, posterior_probability) = find_map_estimate(&dist, regions_in_window);
-
-        results.lock().unwrap().push(WindowResult {
-            chrom: chrom.to_string(),
-            window_start,
-            window_end,
-            msi_score,
-            posterior_probability,
-            regions_in_window,
-        });
-    });
-
-    let mut all_results = results.into_inner().unwrap();
+            Some(WindowResult {
+                chrom: chrom.to_string(),
+                window_start,
+                window_end,
+                msi_score,
+                posterior_probability,
+                regions_in_window,
+            })
+        })
+        .collect();
 
     // Sort by (chrom, window_start)
     all_results.sort_by(|a, b| {
@@ -739,32 +737,29 @@ fn run_global_analysis(
     distribution_af: f32,
     output_req: OutputRequirements,
 ) -> HashMap<String, AfEvolutionResult> {
-    let results = Mutex::new(HashMap::new());
-
     info!(
         "Running global analysis: {} AF thresholds in parallel",
         af_thresholds.len()
     );
 
-    af_thresholds.par_iter().for_each(|af_threshold| {
-        let filtered = filter_regions_by_af(regions, *af_threshold);
-        let result = calculate_msi_metrics(
-            &filtered,
-            total_regions,
-            *af_threshold,
-            sample.to_string(),
-            output_req,
-            distribution_af,
-        );
-        results
-            .lock()
-            .unwrap()
-            .insert(format!("{:.2}", af_threshold), result);
-    });
+    let final_results: HashMap<String, AfEvolutionResult> = af_thresholds
+        .par_iter()
+        .map(|af_threshold| {
+            let filtered = filter_regions_by_af(regions, *af_threshold);
+            let result = calculate_msi_metrics(
+                &filtered,
+                total_regions,
+                *af_threshold,
+                sample.to_string(),
+                output_req,
+                distribution_af,
+            );
 
-    let final_results = results.into_inner().unwrap();
+            (format!("{:.2}", af_threshold), result)
+        })
+        .collect();
+
     info!("Global analysis complete: {} results", final_results.len());
-
     final_results
 }
 
