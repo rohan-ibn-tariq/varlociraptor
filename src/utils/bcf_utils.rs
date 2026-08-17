@@ -430,7 +430,9 @@ pub fn read_bcf_records(path: &Path) -> Result<Vec<bcf::Record>> {
 
 /// Copy specified INFO fields from source to destination BCF record.
 ///
-/// Silently skips fields absent in the source record.
+/// Silently skips fields not declared in the source header. A field that
+/// is declared but fails to read (e.g. a value not matching its declared
+/// type or count) returns an `Err` rather than being silently dropped.
 /// Handles all VCF INFO field types: Integer, Float, String, Flag.
 ///
 /// Designed for use in preprocessing pipelines where a fresh output
@@ -452,30 +454,36 @@ pub(crate) fn copy_info_fields(
     dest: &mut bcf::Record,
     fields: &[&str],
 ) -> Result<()> {
+    let header = source.header();
+
     for field in fields {
         let field_bytes = field.as_bytes();
 
-        if let Ok(Some(values)) = source.info(field_bytes).integer() {
-            dest.push_info_integer(field_bytes, &values)?;
-            continue;
+        match header.info_type(field_bytes) {
+            Ok((TagType::Integer, _)) => {
+                if let Some(values) = source.info(field_bytes).integer()? {
+                    dest.push_info_integer(field_bytes, &values)?;
+                }
+            }
+            Ok((TagType::Float, _)) => {
+                if let Some(values) = source.info(field_bytes).float()? {
+                    dest.push_info_float(field_bytes, &values)?;
+                }
+            }
+            Ok((TagType::String, _)) => {
+                if let Some(values) = source.info(field_bytes).string()? {
+                    dest.push_info_string(field_bytes, &values)?;
+                }
+            }
+            Ok((TagType::Flag, _)) => {
+                if source.info(field_bytes).flag()? {
+                    dest.push_info_flag(field_bytes)?;
+                }
+            }
+            Err(_) => {
+                // Field absent in source - silently skip
+            }
         }
-
-        if let Ok(Some(values)) = source.info(field_bytes).float() {
-            dest.push_info_float(field_bytes, &values)?;
-            continue;
-        }
-
-        if let Ok(Some(values)) = source.info(field_bytes).string() {
-            dest.push_info_string(field_bytes, &values)?;
-            continue;
-        }
-
-        if let Ok(true) = source.info(field_bytes).flag() {
-            dest.push_info_flag(field_bytes)?;
-            continue;
-        }
-
-        // Field absent in source - silently skip
     }
     Ok(())
 }
@@ -1609,6 +1617,54 @@ pub(crate) mod tests {
 
         let (_, result) = read_first_record_simple(tmp_dst.path());
         assert!(result.info(b"SVLEN").integer().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_copy_info_fields_number_mismatch_errors() {
+        // Header declares Number=1 (exactly one value expected)
+        let (tmp_src, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=BADCOUNT,Number=1,Type=Integer,Description="Test">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        // Write 3 values where the header says exactly 1 is expected
+        record.push_info_integer(b"BADCOUNT", &[1, 2, 3]).unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_tmp_dst, writer) = create_info_test_vcf(&[]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+
+        let result = copy_info_fields(&src, &mut dst, &["BADCOUNT"]);
+        assert!(
+            result.is_err(),
+            "Number=1 field with 3 stored values should error, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_copy_info_fields_type_mismatch_errors() {
+        // Header declares Type=Integer
+        let (tmp_src, mut writer) = create_info_test_vcf(&[
+            br##"##INFO=<ID=BADTYPE,Number=1,Type=Integer,Description="Test">"##,
+        ]);
+        let mut record = create_test_record(&writer, 0, 100, b"A", b"AT");
+        // But actually write it as a Float
+        record.push_info_float(b"BADTYPE", &[1.5]).unwrap();
+        writer.write(&record).unwrap();
+        drop(writer);
+
+        let (_tmp_dst, writer) = create_info_test_vcf(&[]);
+        let (_, src) = read_first_record_simple(tmp_src.path());
+        let mut dst = create_test_record(&writer, 0, 100, b"A", b"AT");
+
+        let result = copy_info_fields(&src, &mut dst, &["BADTYPE"]);
+        assert!(
+            result.is_err(),
+            "Integer-declared field actually stored as Float should error, got {:?}",
+            result
+        );
     }
 
     #[test]
