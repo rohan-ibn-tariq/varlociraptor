@@ -13,9 +13,9 @@ use log::debug;
 use rust_htslib::bcf::{self, header::HeaderView};
 
 use crate::utils::bcf_utils::{
-    get_chrom, get_svlen, is_breakend, is_reference_allele, is_spanning_deletion, is_symbolic,
+    get_chrom, is_breakend, is_reference_allele, is_spanning_deletion, is_symbolic,
 };
-use crate::utils::genomics::{calculate_anchor_length, is_clean_indel, is_indel};
+use crate::utils::genomics::{calculate_anchor_length, calculate_dynamic_svlen, is_indel};
 use crate::utils::ms_bed::BedRegion;
 
 /* ============ Data Structures =================== */
@@ -89,18 +89,17 @@ enum RepeatStatus {
 /// assert_eq!(is_perfect_repeat(b"ACAGCAG", 3, "CAG", b"ACAG"), RepeatStatus::Perfect);
 fn is_perfect_repeat(alt_seq: &[u8], svlen: i32, motif: &str, ref_seq: &[u8]) -> RepeatStatus {
     // 0. Handling Edge Cases
-    if ref_seq.is_empty()
-        || alt_seq.is_empty()
-        || !ref_seq[0].eq_ignore_ascii_case(&alt_seq[0])
-        || svlen == 0
-    {
+    // svlen == 0 is not checked separately - is_clean_indel (guaranteed
+    // upstream) already ensures ref_seq.len() != alt_seq.len(), and svlen
+    // is always self-computed as that exact difference, so svlen != 0
+    // whenever this function is reached.
+    if ref_seq.is_empty() || alt_seq.is_empty() || !ref_seq[0].eq_ignore_ascii_case(&alt_seq[0]) {
         return RepeatStatus::NA;
     }
 
     // 1. Use genomics utility to check if clean indel
-    if !is_clean_indel(ref_seq, alt_seq) {
-        return RepeatStatus::NA;
-    }
+    // Relies on caller guarantee: is_clean_indel already checked upstream
+    // in variant_overlaps_region (intersection.rs), same (ref_seq, alt_seq).
 
     // 2. Finding the anchor length and absolute SVLEN
     // Note: Anchor length 0 is not errored as a valid indel
@@ -108,20 +107,18 @@ fn is_perfect_repeat(alt_seq: &[u8], svlen: i32, motif: &str, ref_seq: &[u8]) ->
     let anchor_len = calculate_anchor_length(ref_seq, alt_seq);
 
     // 3. Extracting the changed sequence
+    // Relies on caller guarantee: svlen is always correctly-computed,
+    // see should_include_variant. Combined with is_clean_indel check upstream,
+    // as mentioned in (1), this guarantees anchor_len is always < the relevant seq length,
+    // so the else branches for that are unreachable and therefore not included.
     let changed_seq = if svlen > 0 {
-        if anchor_len < alt_seq.len() {
-            &alt_seq[anchor_len..]
-        } else {
-            return RepeatStatus::NA;
-        }
-    } else if anchor_len < ref_seq.len() {
-        &ref_seq[anchor_len..]
+        &alt_seq[anchor_len..]
     } else {
-        return RepeatStatus::NA;
+        &ref_seq[anchor_len..]
     };
 
     // Validate: changed sequence length should match SVLEN
-    if changed_seq.len() != abs_svlen || changed_seq.is_empty() {
+    if changed_seq.len() != abs_svlen {
         return RepeatStatus::NA;
     }
 
@@ -203,7 +200,7 @@ pub(super) fn should_include_variant(
     }
 
     /* 2. Check Perfect Repeat Status */
-    let svlen = get_svlen(record, alt_idx, ref_allele, alt_allele)?;
+    let svlen = calculate_dynamic_svlen(ref_allele, alt_allele);
     let repeat_status = is_perfect_repeat(alt_allele, svlen, &region.motif, ref_allele);
 
     Ok(repeat_status == RepeatStatus::Perfect)
@@ -272,9 +269,7 @@ mod tests {
             is_perfect_repeat(b"AAAGAGAGAGA", 7, "GA", b"AAAT"),
             RepeatStatus::NA
         );
-        /* Last test: Special Case when tail remains in ref/alt apart from anchor.
-            Here we consider it NA as it's not a clean indel.
-        */
+        // Caught by the length check - is_clean_indel is guaranteed upstream, not re-checked here.
     }
 
     #[test]

@@ -808,6 +808,29 @@ mod tests {
     }
 
     #[test]
+    fn test_process_and_annotate_complex_variant_gets_dummy() {
+        // REF=ATT, ALT=AG: both tails non-empty after anchor - not a clean
+        // indel. Should be treated the same as any non-MS variant: no
+        // REGION_ID annotation, region gets a dummy instead.
+        let tmp_vcf = create_minimal_vcf(
+            &[br"##contig=<ID=chr1,length=1000000>"],
+            &[(0, 99, b"ACAGCAGCAG", &[b"AG"])],
+        );
+        let aux = make_aux_collector(tmp_vcf.path(), &[]);
+        let tmp_bed = create_bed_file(&[("chr1", 100, 121, "7xCAG")]);
+        let tmp_output = NamedTempFile::new().unwrap();
+        let mut input_vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = prepare_header(input_vcf.header(), tmp_bed.path(), &aux).unwrap();
+        let mut writer =
+            bcf::Writer::from_path(tmp_output.path(), &header, true, bcf::Format::Vcf).unwrap();
+        let stats =
+            process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
+        drop(writer);
+        assert_eq!(stats.annotated_indels, 0);
+        assert_eq!(stats.dummy_indels, 1);
+    }
+
+    #[test]
     fn test_process_and_annotate_overlapping_bed_regions_errors() {
         // VCF: chr1:99 ACAG to ACAGCAG (perfect CAG insertion at pos 100)
         // BED: chr1:94-106 4xCAG    (overlaps)
