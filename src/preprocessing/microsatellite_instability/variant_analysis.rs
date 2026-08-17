@@ -61,8 +61,8 @@ enum RepeatStatus {
 ///
 /// No upper size limit is applied to the changed sequence here - any
 /// perfect-motif match is valid regardless of length, no literature
-/// establishes a cutoff (to our knowledge). Large deletions are already excluded before
-/// reaching this function (should_include_variant filters symbolic
+/// we know establishes a cutoff. Large deletions are already excluded
+/// before reaching this function (should_include_variant filters symbolic
 /// alleles via is_symbolic; Varlociraptor converts deletions >50bp to
 /// symbolic <DEL> upstream), so no separate cap is needed here.
 ///
