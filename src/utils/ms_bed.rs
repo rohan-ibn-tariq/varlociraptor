@@ -355,7 +355,8 @@ mod tests {
         assert_eq!(region.end, 109);
         assert_eq!(region.motif, "CAG");
 
-        /* TODO: Check This for MSI if we need to restrict small indels like 1xC */
+        // Small motifs like 1xC (mononucleotide) are valid MS regions - see
+        // is_perfect_repeat's doc comment in variant_analysis.rs for the reasoning.
         let record = bed_record_from_str("chr1\t100\t101\t1xC");
         assert!(parse_bed_record(&record).is_ok());
     }

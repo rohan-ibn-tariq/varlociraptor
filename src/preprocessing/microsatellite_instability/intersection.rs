@@ -132,6 +132,11 @@ impl WindowEntry {
 /// # Note:
 /// We perform point-based overlap, which means we only consider the variant position.
 ///
+/// # Assumption
+/// The indel position is derived from the anchor (common prefix between
+/// REF and ALT), taken directly from the VCF record's own bytes with no
+/// independent re-verification against a loaded reference FASTA.
+///
 /// # Arguments
 /// * `record` - BCF record representing the variant
 /// * `region` - BED region to check overlap against

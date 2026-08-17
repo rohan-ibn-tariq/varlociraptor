@@ -52,6 +52,39 @@ enum RepeatStatus {
 /// * `RepeatStatus::Perfect` - Changed sequence is exact motif repeats
 /// * `RepeatStatus::NA` - Does not match or fails validation
 ///
+/// # Note
+/// Small indels (even a single-base insertion) count as MS indels.
+/// Slippage acts per repeat unit; for mononucleotide repeats that's 1bp,
+/// and it's a common real MSI event.
+/// https://www.sciencedirect.com/topics/neuroscience/slipped-strand-mispairing
+/// https://en.wikipedia.org/wiki/Microsatellite
+///
+/// No upper size limit is applied to the changed sequence here - any
+/// perfect-motif match is valid regardless of length, no literature
+/// establishes a cutoff (to our knowledge). Large deletions are already excluded before
+/// reaching this function (should_include_variant filters symbolic
+/// alleles via is_symbolic; Varlociraptor converts deletions >50bp to
+/// symbolic <DEL> upstream), so no separate cap is needed here.
+///
+/// We discard insertions that are not perfect multiples of the motif, and
+/// this is the right approach. Replication slippage, the mechanism
+/// underlying MSI, produces exclusively whole repeat-unit changes -
+/// Brinkmann et al. 1998 observed zero incomplete-repeat events across
+/// several germline STR mutations, concluding replication slippage was
+/// the sole mechanism. A CAGCAA insertion therefore cannot arise from
+/// slippage alone; it would require either a subsequent point mutation
+/// (a separate mutational process) or a different insertion mechanism
+/// altogether. Both scenarios are computationally indistinguishable,
+/// introducing unresolvable ambiguity into the MSI score. This could be
+/// an interesting future direction.
+/// https://pmc.ncbi.nlm.nih.gov/articles/instance/1377148/pdf/9585597.pdf
+///
+/// We do not track net tract-length change after an indel (i.e. whether
+/// the region "stops being" a microsatellite post-variant). MSI is defined
+/// as a repeat-count change relative to reference, not a constraint on
+/// resulting tract length - the BED regions are already MS loci by
+/// definition from their source annotation.
+///
 /// # Example
 /// assert_eq!(is_perfect_repeat(b"ACAGCAG", 3, "CAG", b"ACAG"), RepeatStatus::Perfect);
 fn is_perfect_repeat(alt_seq: &[u8], svlen: i32, motif: &str, ref_seq: &[u8]) -> RepeatStatus {
@@ -198,7 +231,7 @@ mod tests {
             is_perfect_repeat(b"ATT", 1, "T", b"AT"),
             RepeatStatus::Perfect
         );
-        /* We are considering even low indels like in the last case. TODO: Check if discarding is better behaviour. */
+        // Small indels (1bp mononucleotide) are valid MSI events - see is_perfect_repeat's doc comment.
     }
 
     #[test]
