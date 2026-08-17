@@ -56,9 +56,6 @@ pub struct MSIConfig {
     /// Allele frequency thresholds to consider for AF evolution analysis
     /// when generating pseudotime outputs. (default: [1.0,0.8,0.6,0.4,0.2,0.0])
     /// If no pseudotime outputs are requested, this will be set to [0.0] to optimize computation.
-    /// Note: This field is populated during CLI parsing and currently not validated for non [0-1] values
-    /// as the this field is hidden constant set at CLI level. So future changes to expose this field
-    /// to users should include validation for this field.
     pub af_thresholds: Vec<f32>,
     /// Fixed AF at which the full P(K=k) distribution is reported.
     /// Must be present in `af_thresholds` - enforced in `validate()`.

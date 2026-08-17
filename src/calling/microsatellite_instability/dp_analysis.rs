@@ -26,6 +26,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use super::extraction::{RegionSummary, Variant};
+use crate::constants::EPSILON;
 use crate::utils::stats::calculate_percentage_exact;
 
 /* ============ Data Structures =================== */
@@ -536,7 +537,9 @@ fn calculate_msi_metrics(
 
     // Step 5: Create full distribution (only if distribution output requested
     // AND current AF threshold matches distribution_af)
-    let distribution = if output_req.needs_distribution && af_threshold == distribution_af {
+    let distribution = if output_req.needs_distribution
+        && (af_threshold - distribution_af).abs() < EPSILON as f32
+    {
         Some(
             distribution_raw
                 .iter()
