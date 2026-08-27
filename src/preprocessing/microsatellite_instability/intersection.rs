@@ -210,6 +210,8 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// # Delegation
 /// - Variant filtering: `variant_analysis::should_include_variant`
 /// - VCF writing: `writer::write_variant`, `writer::inject_dummy_deletion`
+///   (the latter panics if a BED chromosome is missing from the header -
+///   guaranteed not to happen via `prepare_header`)
 ///
 /// # Arguments
 /// * `input_vcf` - Opened BCF reader for input VCF

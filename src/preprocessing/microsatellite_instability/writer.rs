@@ -69,6 +69,13 @@ pub(super) struct VariantInWindow {
 /// * `Ok(())` on success
 /// * `Err` if chromosome not found or motif is empty
 ///
+/// # Note:
+/// Panics if `region.chrom` is not present in the writer's header.
+/// This is expected to never happen when called from the real pipeline:
+/// `prepare_header` (header.rs) guarantees every BED chromosome is added
+/// to the header before this writer is constructed - see
+/// `header.rs::test_prepare_header_adds_missing_contigs`.
+///
 /// # Example
 /// assert!(inject_dummy_deletion(&mut writer, &region).is_ok());
 pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> Result<()> {
@@ -76,12 +83,7 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
 
     let header = writer.header();
 
-    let rid =
-        header
-            .name2rid(region.chrom.as_bytes())
-            .map_err(|_| Error::MsiChromosomeNotFound {
-                chrom: region.chrom.clone(),
-            })?;
+    let rid = header.name2rid(region.chrom.as_bytes()).unwrap();
     record.set_rid(Some(rid));
 
     let motif_bytes = region.motif.as_bytes();
@@ -279,6 +281,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
     fn test_inject_dummy_deletion_chromosome_not_found() {
         let tmp = NamedTempFile::new().unwrap();
         let mut header = bcf::Header::new();
@@ -294,10 +297,7 @@ mod tests {
             motif: "CAG".to_string(),
         };
 
-        let result = inject_dummy_deletion(&mut writer, &region);
-
-        assert!(result.is_err());
-        assert!(format!("{}", result.unwrap_err()).contains("chr2"));
+        let _ = inject_dummy_deletion(&mut writer, &region);
     }
 
     /* ====== write_variant tests ==================== */

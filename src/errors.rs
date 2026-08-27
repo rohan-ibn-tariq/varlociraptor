@@ -255,8 +255,6 @@ pub(crate) enum Error {
     #[error("No chromosome match between BED and VCF files. Verify chromosome naming is consistent (e.g., 'chr1' vs '1')")]
     MsiVcfChromMismatch,
     /* -------------------- VCF/BED Interaction ---------------------- */
-    #[error("Chromosome '{chrom}' from BED file not found in VCF header. Ensure chromosome naming is consistent (e.g., 'chr1' vs '1')")]
-    MsiChromosomeNotFound { chrom: String },
     #[error(
         "Variant at position {pos} overlaps multiple BED regions: \
         '{existing_region}' and '{new_region}'. \
