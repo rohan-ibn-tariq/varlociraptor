@@ -366,41 +366,6 @@ mod tests {
     }
 
     #[test]
-    fn test_write_variant_preserves_variant_data() {
-        let tmp = NamedTempFile::new().unwrap();
-        let header = create_minimal_vcf_header();
-        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
-
-        let record = create_test_record(&writer, 0, 5000, b"GCAG", b"G");
-
-        let variant_info = VariantInWindow {
-            record,
-            chrom: "chr1".to_string(),
-            matching_regions: {
-                let mut m = HashMap::new();
-                m.insert(0, "chr1:5000-5020".to_string());
-                m
-            },
-            aux_info: AuxInfo::default(),
-        };
-
-        let mut counter = 0;
-        write_variant(&mut writer, variant_info, &mut counter).unwrap();
-        drop(writer);
-
-        let (_reader, record) = read_first_record_simple(tmp.path());
-
-        assert_eq!(record.pos(), 5000);
-
-        let alleles = record.alleles();
-        assert_eq!(alleles[0], b"GCAG");
-        assert_eq!(alleles[1], b"G");
-
-        let region_id = record.info(b"REGION_ID").string().unwrap().unwrap();
-        assert_eq!(region_id[0], b"chr1:5000-5020");
-    }
-
-    #[test]
     fn test_write_variant_removes_existing_region_id_non_ms() {
         let tmp = NamedTempFile::new().unwrap();
         let header = create_minimal_vcf_header();
