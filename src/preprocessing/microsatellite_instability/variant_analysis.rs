@@ -319,8 +319,8 @@ mod tests {
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
-            start: 0,
-            end: 201,
+            start: 100,
+            end: 121,
             motif: "CAG".to_string(),
         };
 
@@ -383,8 +383,8 @@ mod tests {
 
         let region = BedRegion {
             chrom: "chr1".to_string(),
-            start: 0,
-            end: 201,
+            start: 100,
+            end: 121,
             motif: "CAG".to_string(),
         };
 

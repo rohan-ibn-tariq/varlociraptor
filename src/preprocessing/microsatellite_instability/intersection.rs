@@ -937,7 +937,7 @@ mod tests {
                 (0, 99, b"ACAG", &[b"ACAGCAG"]), // matches region A
                 (0, 200, b"A", &[b"T"]),         // SNV near region B
                 (0, 299, b"ACAGCAGCAGCAG", &[b"ACAGCAGCAGCAGCAG", b"T"]), // alt0 matches region C, alt1 doesn't
-                (0, 302, b"GCAG", &[b"ACAGCAGCAGCAGCAG", b"T"]), // alt0 matches region C, alt1 doesn't
+                (0, 302, b"GCAG", &[b"GCAGCAGCAGCAGCAG", b"T"]), // alt0 matches region C, alt1 doesn't
                 (0, 349, b"A", &[b"T"]),                         // SNV between C and D
                 (0, 399, b"ACAG", &[b"ACAGCAG"]),                // matches region D
                 (1, 199, b"ACAG", &[b"ACAGCAT"]),                // Doesn't match F, not perfect
@@ -965,7 +965,7 @@ mod tests {
             process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
         drop(writer);
 
-        assert_eq!(stats.annotated_indels, 4);
+        assert_eq!(stats.annotated_indels, 5);
         assert_eq!(stats.dummy_indels, 3);
 
         let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
