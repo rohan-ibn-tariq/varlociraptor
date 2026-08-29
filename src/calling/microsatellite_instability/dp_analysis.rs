@@ -21,13 +21,11 @@ use std::collections::HashMap;
 use anyhow::Result;
 use log::{info, warn};
 use rayon::prelude::*;
-use rust_decimal::prelude::*;
-use rust_decimal::Decimal;
 use serde::Serialize;
 
 use super::extraction::{RegionSummary, Variant};
 use crate::constants::EPSILON;
-use crate::utils::stats::calculate_percentage_exact;
+use crate::utils::stats::{calculate_percentage, usize_to_f64_exact};
 
 /* ============ Data Structures =================== */
 
@@ -422,7 +420,7 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
         .map(|(k, _)| k)
         .unwrap_or(0);
 
-    let msi_score = calculate_percentage_exact(k_map, total_regions);
+    let msi_score = calculate_percentage(k_map, total_regions);
     let posterior_probability = dist.get(k_map).copied().unwrap_or(0.0);
 
     (k_map, msi_score, posterior_probability)
@@ -484,44 +482,31 @@ fn calculate_msi_metrics(
         let (k_map_raw, msi_score_map_raw, _) = find_map_estimate(&distribution_raw, total_regions);
         let regions_with_variants_count = filtered.len();
 
-        let k_map_decimal = Decimal::from(k_map_raw);
+        let k_map_f64 = usize_to_f64_exact(k_map_raw);
 
         // Calculate variance: Var(K) = Σ[(k - k_map)² × P(k)]
-        let variance_decimal: Decimal = distribution_raw
+        let variance_f64: f64 = distribution_raw
             .iter()
             .enumerate()
             .map(|(k, &prob)| {
-                let k_decimal = Decimal::from(k);
-                let diff = k_decimal - k_map_decimal;
+                let k_f64 = usize_to_f64_exact(k);
+                let diff = k_f64 - k_map_f64;
                 let diff_squared = diff * diff;
-                let prob_decimal = Decimal::from_f64_retain(prob).unwrap_or(Decimal::from(0));
-                diff_squared * prob_decimal
+                diff_squared * prob
             })
             .sum();
 
         // Calculate standard deviation
-        let std_dev_decimal = variance_decimal.sqrt().unwrap_or(Decimal::from(0));
+        let std_dev_f64 = variance_f64.sqrt();
 
         // Get confidence bounds
-        let total_decimal = Decimal::from(total_regions);
-        let hundred = Decimal::from(100);
-        let zero = Decimal::from(0);
-
-        let lower_k_decimal = (k_map_decimal - std_dev_decimal).max(zero);
-        let upper_k_decimal = (k_map_decimal + std_dev_decimal).min(total_decimal);
-        let lower_percentage_decimal = (lower_k_decimal / total_decimal) * hundred;
-        let upper_percentage_decimal = (upper_k_decimal / total_decimal) * hundred;
-        let lower = lower_percentage_decimal
-            .max(zero)
-            .min(hundred)
-            .to_f64()
-            .unwrap_or(0.0);
-        let upper = upper_percentage_decimal
-            .max(zero)
-            .min(hundred)
-            .to_f64()
-            .unwrap_or(0.0);
-        let std_dev_f64 = std_dev_decimal.to_f64().unwrap_or(0.0);
+        let total_f64 = usize_to_f64_exact(total_regions);
+        let lower_k = (k_map_f64 - std_dev_f64).max(0.0);
+        let upper_k = (k_map_f64 + std_dev_f64).min(total_f64);
+        let lower_percentage = (lower_k / total_f64) * 100.0;
+        let upper_percentage = (upper_k / total_f64) * 100.0;
+        let lower = lower_percentage.max(0.0).min(100.0);
+        let upper = upper_percentage.max(0.0).min(100.0);
 
         (
             Some(k_map_raw),
@@ -545,7 +530,7 @@ fn calculate_msi_metrics(
                 .iter()
                 .enumerate()
                 .map(|(k, &probability)| {
-                    let msi_score = calculate_percentage_exact(k, total_regions);
+                    let msi_score = calculate_percentage(k, total_regions);
                     DpResult {
                         k,
                         msi_score,

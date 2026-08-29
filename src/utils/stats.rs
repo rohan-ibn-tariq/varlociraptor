@@ -4,11 +4,10 @@
 //!
 //! This module provides precise statistical calculations including:
 //! 1. PHRED score conversion
-//! 2. Exact percentage computation using decimal arithmetic.
+//! 2. Checked usize-to-f64 conversion (panics on precision loss)
+//! 3. Percentage computation
 
 use bio::stats::{PHREDProb, Prob};
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
 
 /// Convert PHRED-scaled probability to linear probability.
 ///
@@ -32,11 +31,29 @@ pub(crate) fn phred_to_prob(phred: f64) -> f64 {
     *Prob::from(PHREDProb(phred))
 }
 
-/// Calculate percentage using exact decimal arithmetic.
+/// Convert a `usize` to `f64`, panicking if the value can't be represented exactly.
 ///
-/// Prevents floating-point precision loss when working with large integers
-/// or when exact decimal representation is required. Uses the `rust_decimal`
-/// crate for arbitrary precision decimal arithmetic.
+/// `f64` represents integers exactly only up to 2^53. This codebase's counts
+/// (e.g region totals) never approach that scale in practice, but this
+/// guards against silently producing a corrupted percentage/statistic if
+/// that assumption is ever violated, instead of failing loudly.
+///
+/// # Panics
+/// Panics if `value > 2^53` (9_007_199_254_740_992), where the conversion
+/// would lose precision.
+pub(crate) fn usize_to_f64_exact(value: usize) -> f64 {
+    const MAX_EXACT_F64_INT: usize = 1 << 53;
+
+    assert!(
+        value <= MAX_EXACT_F64_INT,
+        "usize value {} exceeds f64 exact-integer range (2^53); conversion would lose precision",
+        value
+    );
+
+    value as f64
+}
+
+/// Calculate percentage as a simple f64 ratio.
 ///
 /// # Arguments
 /// * `numerator` - Count value (e.g., number of unstable regions)
@@ -46,23 +63,14 @@ pub(crate) fn phred_to_prob(phred: f64) -> f64 {
 /// * Percentage as f64 in range [0.0, 100.0]
 /// * Returns 0.0 if denominator is zero (avoiding division by zero)
 ///
-/// # Precision
-/// Internally exact via `Decimal`, but the result is converted to `f64`
-/// before returning - the returned value has normal f64 precision.
-///
 /// # Examples
-/// assert_eq!(calculate_percentage_exact(5, 100), 5.0);`
-pub fn calculate_percentage_exact(numerator: usize, denominator: usize) -> f64 {
+/// assert_eq!(calculate_percentage(5, 100), 5.0);`
+pub fn calculate_percentage(numerator: usize, denominator: usize) -> f64 {
     if denominator == 0 {
         return 0.0;
     }
 
-    let num = Decimal::from(numerator);
-    let den = Decimal::from(denominator);
-    let ratio = num / den;
-    let percentage = ratio * Decimal::from(100);
-
-    percentage.to_f64().unwrap_or(0.0)
+    (usize_to_f64_exact(numerator) / usize_to_f64_exact(denominator)) * 100.0
 }
 
 #[cfg(test)]
@@ -99,9 +107,27 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_percentage_exact() {
-        assert_eq!(calculate_percentage_exact(1, 4), 25.0);
-        assert_eq!(calculate_percentage_exact(0, 100), 0.0);
-        assert_eq!(calculate_percentage_exact(5, 0), 0.0);
+    fn test_usize_to_f64_exact_normal_value() {
+        assert_eq!(usize_to_f64_exact(1_000_000), 1_000_000.0);
+    }
+
+    #[test]
+    fn test_usize_to_f64_exact_at_boundary() {
+        let boundary = 1usize << 53;
+        assert_eq!(usize_to_f64_exact(boundary), boundary as f64);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds f64 exact-integer range")]
+    fn test_usize_to_f64_exact_panics_above_boundary() {
+        let over = (1usize << 53) + 1;
+        usize_to_f64_exact(over);
+    }
+
+    #[test]
+    fn test_calculate_percentage() {
+        assert_eq!(calculate_percentage(1, 4), 25.0);
+        assert_eq!(calculate_percentage(0, 100), 0.0);
+        assert_eq!(calculate_percentage(5, 0), 0.0);
     }
 }
