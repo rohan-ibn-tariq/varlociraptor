@@ -21,7 +21,7 @@ use crate::utils::ms_bed::BedRegion;
 /* ============ Data Structures =================== */
 
 /// Classification of indel repeat pattern relative to microsatellite motif.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum RepeatStatus {
     /// Variant indel is a perfect tandem repeat of the motif.
     Perfect,

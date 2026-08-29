@@ -36,7 +36,7 @@ use crate::utils::stats::{calculate_percentage, usize_to_f64_exact};
 ///
 /// p_stable = P(all variants absent) = Π(prob_absent)
 /// p_unstable = 1 - p_stable (computed in DP algorithm)
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RegionProbability {
     p_stable: f64,
 }
@@ -45,7 +45,7 @@ struct RegionProbability {
 ///
 /// Represents the probability that exactly k regions are unstable,
 /// along with the corresponding MSI score.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub(super) struct DpResult {
     pub k: usize,
     pub msi_score: f64,
@@ -56,7 +56,7 @@ pub(super) struct DpResult {
 ///
 /// Contains the MSI analysis results including MAP estimate,
 /// uncertainty bounds, and optionally the full probability distribution.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub(super) struct AfEvolutionResult {
     pub sample: String,
     pub af_threshold: f32,
@@ -406,7 +406,10 @@ fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
 ///
 /// # Arguments
 /// * `dist`          - DP probability distribution from `run_dp_for_regions`
-/// * `total_regions` - Denominator for MSI score (total MS regions)
+/// * `total_regions` - Denominator for the MSI percentage. Callers pass
+///   either the genome-wide region count (global analysis) or the
+///   region count within a single window (windowed analysis) - this
+///   function is agnostic to which.
 ///
 /// # Returns
 /// `(k_map, msi_score, posterior_probability)` where:
