@@ -628,7 +628,14 @@ fn run_windowed_analysis(
     af_threshold: f32,
     window_size: u64,
 ) -> Vec<WindowResult> {
-    if regions.is_empty() || window_size == 0 {
+    debug_assert!(
+        window_size != 0,
+        "window_size=0 guaranteed unreachable: MSIConfig::validate() requires \
+        sliding_window != 0 whenever a heatmap output is requested, and this \
+        function is only called when needs_heatmap is true"
+    );
+
+    if regions.is_empty() {
         return Vec::new();
     }
 
@@ -1420,10 +1427,10 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "window_size=0 guaranteed unreachable")]
     fn test_run_windowed_analysis_zero_window_size() {
         let regions = vec![make_region("chr1", 100, vec![make_variant(0.1, 0.8)], true)];
-        let results = run_windowed_analysis(&regions, 0.1, 0);
-        assert!(results.is_empty());
+        run_windowed_analysis(&regions, 0.1, 0);
     }
 
     #[test]
