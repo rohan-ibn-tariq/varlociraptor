@@ -324,9 +324,9 @@ pub(super) fn generate_distribution_plot_spec(
 /// # Output Format
 /// Tab-separated values, sorted highest to lowest AF threshold.
 /// ```text
-/// sample    af_threshold    msi_score(threshold=3.5)    k_map    regions_with_variants    msi_status    uncertainty_lower    uncertainty_upper    map_std_dev
-/// tumor     1.0             0.00                       0        20                       MSS          0.00                0.00                 0.000000
-/// tumor     0.8             2.50                       2        35                       MSS          1.80                3.20                 0.700000
+/// sample    af_threshold    total_regions    msi_score(threshold=3.5)    k_map    regions_af_pass    msi_status    uncertainty_lower    uncertainty_upper    map_std_dev
+/// tumor     1.0             40               0.00                       0        20                 MSS          0.00                0.00                 0.000000
+/// tumor     0.8             40               2.50                       2        35                 MSS          1.80                3.20                 0.700000
 /// ```
 ///
 /// # Arguments
@@ -354,7 +354,7 @@ pub(super) fn write_pseudotime_data(
 
     writeln!(
         writer,
-        "sample\taf_threshold\tmsi_score(threshold={:.1})\tk_map\tregions_with_variants\tmsi_status\tuncertainty_lower\tuncertainty_upper\tmap_std_dev",
+        "sample\taf_threshold\ttotal_regions\tmsi_score(threshold={:.1})\tk_map\tregions_af_pass\tmsi_status\tuncertainty_lower\tuncertainty_upper\tmap_std_dev",
         msi_threshold
     )?;
 
@@ -385,7 +385,7 @@ pub(super) fn write_pseudotime_data(
             .map(|v| v.to_string())
             .unwrap_or_else(|| "NA".to_string());
         let regions_str = result
-            .regions_with_variants
+            .regions_af_pass
             .map(|v| v.to_string())
             .unwrap_or_else(|| "NA".to_string());
         let lower = result
@@ -403,9 +403,10 @@ pub(super) fn write_pseudotime_data(
 
         writeln!(
             writer,
-            "{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             sample,
             af_f32,
+            result.total_regions,
             msi_score_str,
             k_map_str,
             regions_str,
@@ -658,9 +659,10 @@ mod tests {
             AfEvolutionResult {
                 sample: "tumor".to_string(),
                 af_threshold: 0.0,
+                total_regions: 40,
                 k_map: None,
                 msi_score_map: None,
-                regions_with_variants: None,
+                regions_af_pass: None,
                 uncertainty_lower: None,
                 uncertainty_upper: None,
                 map_std_dev: None,
@@ -688,9 +690,10 @@ mod tests {
             AfEvolutionResult {
                 sample: "tumor".to_string(),
                 af_threshold: 0.0,
+                total_regions: 40,
                 k_map: Some(2),
                 msi_score_map: Some(2.0),
-                regions_with_variants: Some(10),
+                regions_af_pass: Some(10),
                 uncertainty_lower: Some(1.0),
                 uncertainty_upper: Some(3.0),
                 map_std_dev: Some(0.5),

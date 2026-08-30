@@ -827,36 +827,36 @@ fn test_call_msi_pseudotime_basic() -> Result<()> {
     // af=1.0: no variant (AF 0.9, 0.6, 0.3) passes -> empty DP -> k_map=0
     let row_af_1_0 = rows.iter().find(|r| r[1] == "1.00").expect("af=1.0 row");
     assert_eq!(
-        row_af_1_0[3], "0",
+        row_af_1_0[4], "0",
         "k_map=0 when no regions pass the filter"
     );
-    assert_eq!(row_af_1_0[2], "0.00");
-    assert_eq!(row_af_1_0[5], "MSS");
+    assert_eq!(row_af_1_0[3], "0.00");
+    assert_eq!(row_af_1_0[6], "MSS");
 
     // af=0.8: only the AF=0.9 region passes -> single region, p_stable=0.4 -> k_map=1
     let row_af_0_8 = rows.iter().find(|r| r[1] == "0.80").expect("af=0.8 row");
     assert_eq!(
-        row_af_0_8[3], "1",
+        row_af_0_8[4], "1",
         "single region with p_stable=0.4 -> k_map=1"
     );
-    assert_eq!(row_af_0_8[2], "33.33");
+    assert_eq!(row_af_0_8[3], "33.33");
 
     // af=0.6: AF=0.9 and AF=0.6 regions pass -> p_stable=[0.4,0.45] -> DP favors k=1 (0.49 vs 0.18, 0.33)
     let row_af_0_6 = rows.iter().find(|r| r[1] == "0.60").expect("af=0.6 row");
     assert_eq!(
-        row_af_0_6[3], "1",
+        row_af_0_6[4], "1",
         "two-region DP still favors k_map=1 here"
     );
-    assert_eq!(row_af_0_6[2], "33.33");
+    assert_eq!(row_af_0_6[3], "33.33");
 
     // af=0.0: all three regions pass -> p_stable=[0.4,0.45,0.6] -> DP favors k=2 (0.394 vs 0.366/0.132/0.108)
     let row_af_0_0 = rows.iter().find(|r| r[1] == "0.00").expect("af=0.0 row");
     assert_eq!(
-        row_af_0_0[3], "2",
+        row_af_0_0[4], "2",
         "three-region DP shifts the mode to k_map=2"
     );
-    assert_eq!(row_af_0_0[2], "66.67");
-    assert_eq!(row_af_0_0[5], "MSI-High");
+    assert_eq!(row_af_0_0[3], "66.67");
+    assert_eq!(row_af_0_0[6], "MSI-High");
 
     /****** Plot Checks ************/
     let plot_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(&plot)?)?;
@@ -1055,10 +1055,10 @@ fn test_call_msi_dummy_and_real_mixed() -> Result<()> {
     let fields: Vec<&str> = row_af_0_0.split('\t').collect();
 
     assert_eq!(
-        fields[3], "1",
+        fields[4], "1",
         "only the real indel region registers as unstable (k_map=1)"
     );
-    assert_eq!(fields[2], "50.00", "msi_score = 1/2 * 100");
+    assert_eq!(fields[3], "50.00", "msi_score = 1/2 * 100");
 
     Ok(())
 }
@@ -1090,10 +1090,10 @@ fn test_call_msi_multi_sample_picks_correct_column() -> Result<()> {
         .expect("tumor row at af=0.6");
     let tumor_fields: Vec<&str> = tumor_row_0_6.split('\t').collect();
     assert_eq!(
-        tumor_fields[3], "1",
+        tumor_fields[4], "1",
         "tumor AF=0.8 passes 0.6 threshold -> k_map=1"
     );
-    assert_eq!(tumor_fields[2], "100.00");
+    assert_eq!(tumor_fields[3], "100.00");
 
     // Normal AF=0.0 < 0.6: region excluded -> DP over zero regions -> k_map=0 -> msi_score=0.00
     let normal_content = fs::read_to_string(&normal_out)?;
@@ -1103,10 +1103,10 @@ fn test_call_msi_multi_sample_picks_correct_column() -> Result<()> {
         .expect("normal row at af=0.6");
     let normal_fields: Vec<&str> = normal_row_0_6.split('\t').collect();
     assert_eq!(
-        normal_fields[3], "0",
+        normal_fields[4], "0",
         "normal AF=0.0 fails 0.6 threshold -> k_map=0"
     );
-    assert_eq!(normal_fields[2], "0.00");
+    assert_eq!(normal_fields[3], "0.00");
 
     Ok(())
 }

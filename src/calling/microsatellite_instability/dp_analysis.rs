@@ -60,13 +60,14 @@ pub(super) struct DpResult {
 pub(super) struct AfEvolutionResult {
     pub sample: String,
     pub af_threshold: f32,
+    pub total_regions: usize,
     // Only computed if pseudotime output requested:
     #[serde(skip_serializing_if = "Option::is_none")]
     pub k_map: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msi_score_map: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub regions_with_variants: Option<usize>,
+    pub regions_af_pass: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uncertainty_lower: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -472,56 +473,51 @@ fn calculate_msi_metrics(
     // Step 2: Run DP to get probability distribution
     let distribution_raw = run_dp_for_regions(filtered);
 
-    // Steps 3 & 4: Compute k_map/msi_score_map/regions_with_variants and the
+    // Steps 3 & 4: Compute k_map/msi_score_map/regions_af_pass and the
     // uncertainty bounds together, ONLY if pseudotime is needed.
-    let (
-        k_map,
-        msi_score_map,
-        regions_with_variants,
-        uncertainty_lower,
-        uncertainty_upper,
-        map_std_dev,
-    ) = if output_req.needs_pseudotime {
-        let (k_map_raw, msi_score_map_raw, _) = find_map_estimate(&distribution_raw, total_regions);
-        let regions_with_variants_count = filtered.len();
+    let (k_map, msi_score_map, regions_af_pass, uncertainty_lower, uncertainty_upper, map_std_dev) =
+        if output_req.needs_pseudotime {
+            let (k_map_raw, msi_score_map_raw, _) =
+                find_map_estimate(&distribution_raw, total_regions);
+            let regions_af_pass_count = filtered.len();
 
-        let k_map_f64 = usize_to_f64_exact(k_map_raw);
+            let k_map_f64 = usize_to_f64_exact(k_map_raw);
 
-        // Calculate variance: Var(K) = Σ[(k - k_map)² × P(k)]
-        let variance_f64: f64 = distribution_raw
-            .iter()
-            .enumerate()
-            .map(|(k, &prob)| {
-                let k_f64 = usize_to_f64_exact(k);
-                let diff = k_f64 - k_map_f64;
-                let diff_squared = diff * diff;
-                diff_squared * prob
-            })
-            .sum();
+            // Calculate variance: Var(K) = Σ[(k - k_map)² × P(k)]
+            let variance_f64: f64 = distribution_raw
+                .iter()
+                .enumerate()
+                .map(|(k, &prob)| {
+                    let k_f64 = usize_to_f64_exact(k);
+                    let diff = k_f64 - k_map_f64;
+                    let diff_squared = diff * diff;
+                    diff_squared * prob
+                })
+                .sum();
 
-        // Calculate standard deviation
-        let std_dev_f64 = variance_f64.sqrt();
+            // Calculate standard deviation
+            let std_dev_f64 = variance_f64.sqrt();
 
-        // Get confidence bounds
-        let total_f64 = usize_to_f64_exact(total_regions);
-        let lower_k = (k_map_f64 - std_dev_f64).max(0.0);
-        let upper_k = (k_map_f64 + std_dev_f64).min(total_f64);
-        let lower_percentage = (lower_k / total_f64) * 100.0;
-        let upper_percentage = (upper_k / total_f64) * 100.0;
-        let lower = lower_percentage.max(0.0).min(100.0);
-        let upper = upper_percentage.max(0.0).min(100.0);
+            // Get confidence bounds
+            let total_f64 = usize_to_f64_exact(total_regions);
+            let lower_k = (k_map_f64 - std_dev_f64).max(0.0);
+            let upper_k = (k_map_f64 + std_dev_f64).min(total_f64);
+            let lower_percentage = (lower_k / total_f64) * 100.0;
+            let upper_percentage = (upper_k / total_f64) * 100.0;
+            let lower = lower_percentage.max(0.0).min(100.0);
+            let upper = upper_percentage.max(0.0).min(100.0);
 
-        (
-            Some(k_map_raw),
-            Some(msi_score_map_raw),
-            Some(regions_with_variants_count),
-            Some(lower),
-            Some(upper),
-            Some(std_dev_f64),
-        )
-    } else {
-        (None, None, None, None, None, None)
-    };
+            (
+                Some(k_map_raw),
+                Some(msi_score_map_raw),
+                Some(regions_af_pass_count),
+                Some(lower),
+                Some(upper),
+                Some(std_dev_f64),
+            )
+        } else {
+            (None, None, None, None, None, None)
+        };
 
     // Step 5: Create full distribution (only if distribution output requested
     // AND current AF threshold matches distribution_af)
@@ -549,9 +545,10 @@ fn calculate_msi_metrics(
     AfEvolutionResult {
         sample,
         af_threshold,
+        total_regions,
         k_map,
         msi_score_map,
-        regions_with_variants,
+        regions_af_pass,
         uncertainty_lower,
         uncertainty_upper,
         map_std_dev,
@@ -1210,7 +1207,7 @@ mod tests {
 
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
-        assert!(result.regions_with_variants.is_none());
+        assert!(result.regions_af_pass.is_none());
     }
 
     #[test]
@@ -1478,7 +1475,7 @@ mod tests {
         assert_eq!(r.sample, "sample1");
         assert_eq!(r.k_map.unwrap(), 1);
         assert!((r.msi_score_map.unwrap() - 1.0).abs() < TEST_EPSILON);
-        assert_eq!(r.regions_with_variants.unwrap(), 1);
+        assert_eq!(r.regions_af_pass.unwrap(), 1);
     }
 
     /* ============ Orchestrator ===================== */
@@ -1512,7 +1509,7 @@ mod tests {
 
         assert!(result.k_map.is_none());
         assert!(result.msi_score_map.is_none());
-        assert!(result.regions_with_variants.is_none());
+        assert!(result.regions_af_pass.is_none());
         assert!(result.uncertainty_lower.is_none());
         assert!(result.uncertainty_upper.is_none());
         assert!(result.map_std_dev.is_none());
@@ -1560,7 +1557,7 @@ mod tests {
         // AF=1.0: no variants pass (0.9 < 1.0, 0.5 < 1.0)
         let af_1_0 = &results["1.00"];
         assert_eq!(
-            af_1_0.regions_with_variants.unwrap(),
+            af_1_0.regions_af_pass.unwrap(),
             0,
             "No regions should pass AF=1.0 threshold"
         );
@@ -1578,7 +1575,7 @@ mod tests {
         // AF=0.5: both variants pass (0.9 ≥ 0.5, 0.5 ≥ 0.5)
         let af_0_5 = &results["0.50"];
         assert_eq!(
-            af_0_5.regions_with_variants.unwrap(),
+            af_0_5.regions_af_pass.unwrap(),
             2,
             "Both regions should pass AF=0.5 threshold"
         );
@@ -1598,7 +1595,7 @@ mod tests {
         // AF=0.0: both variants pass (all pass)
         let af_0_0 = &results["0.00"];
         assert_eq!(
-            af_0_0.regions_with_variants.unwrap(),
+            af_0_0.regions_af_pass.unwrap(),
             2,
             "Both regions should pass AF=0.0 threshold"
         );
