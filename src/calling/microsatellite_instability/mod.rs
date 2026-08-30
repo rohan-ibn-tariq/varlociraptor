@@ -31,8 +31,9 @@ use crate::cli::{validate_thread_count, validate_vcf_file};
 use crate::constants::{EPSILON, MIN_MSI_THRESHOLD};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
-    is_phred_scaled_from_path, validate_events_exist, validate_required_vcf_fields_msi,
-    validate_samples_exist, validate_vcf_file as validate_ms_vcf_file,
+    get_sample_index, is_phred_scaled_from_path, validate_events_exist,
+    validate_required_vcf_fields_msi, validate_samples_exist,
+    validate_vcf_file as validate_ms_vcf_file,
 };
 
 use dp_analysis::{AnalysisConfig, OutputRequirements};
@@ -224,11 +225,7 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
             bcf::Reader::from_path(&config.calls).context("Failed to open calls VCF/BCF")?;
         let header = vcf.header().clone();
 
-        let sample_idx = header.sample_id(config.sample.as_bytes()).ok_or_else(|| {
-            Error::VcfSamplesNotFound {
-                sample: config.sample.clone(),
-            }
-        })?;
+        let sample_idx = get_sample_index(&header, &config.sample)?;
 
         let (regions, stats) = extraction::extract_regions(
             &mut vcf,
@@ -338,4 +335,225 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
     info!("==============================================");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::bcf_utils::tests::{create_test_vcf, TestVcfConfig};
+    use std::path::Path;
+    use tempfile::NamedTempFile;
+
+    /// `create_test_vcf`'s temp file has no extension, but MSIConfig::validate()'s
+    /// first check (crate::cli::validate_vcf_file) requires a .vcf-style filename.
+    /// Copy the generated content into a properly-suffixed temp file.
+    fn create_test_vcf_named(config: TestVcfConfig) -> (NamedTempFile, Vec<String>) {
+        let (raw_tmp, sample_names) = create_test_vcf(config);
+        let named_tmp = tempfile::Builder::new().suffix(".vcf").tempfile().unwrap();
+        std::fs::copy(raw_tmp.path(), named_tmp.path()).unwrap();
+        (named_tmp, sample_names)
+    }
+
+    /// Build a config that passes every check, so each test can break exactly one field.
+    fn valid_config(calls: &Path, sample: String) -> MSIConfig {
+        MSIConfig {
+            calls: calls.to_path_buf(),
+            sample,
+            events: vec!["somatic".to_string()], // matches PROB_SOMATIC in create_test_vcf's default output
+            msi_threshold: 3.5,
+            af_thresholds: vec![1.0, 0.5, 0.0],
+            distribution_af: 0.5,
+            windowed_af: 0.5,
+            sliding_window: 1_000_000,
+            threads: None,
+            plot_distribution: Some(PathBuf::from("out.vl.json")),
+            plot_pseudotime: None,
+            plot_heatmap: None,
+            data_distribution: None,
+            data_pseudotime: None,
+            data_heatmap: None,
+            is_phred: false,
+        }
+    }
+
+    #[test]
+    fn test_validate_succeeds_with_valid_config() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_missing_sample() {
+        let (tmp_vcf, _) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let config = valid_config(tmp_vcf.path(), "nonexistent_sample".to_string());
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("nonexistent_sample"));
+    }
+
+    #[test]
+    fn test_validate_missing_event() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.events = vec!["not_a_real_event".to_string()];
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("not_a_real_event"));
+    }
+
+    #[test]
+    fn test_validate_distribution_af_not_in_thresholds() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.af_thresholds = vec![1.0, 0.5, 0.0];
+        config.distribution_af = 0.7; // not present in af_thresholds
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("distribution"));
+    }
+
+    #[test]
+    fn test_validate_af_threshold_entry_out_of_range() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.af_thresholds = vec![1.5, 0.5]; // 1.5 is out of [0.0, 1.0]
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("1.5"));
+    }
+
+    #[test]
+    fn test_validate_distribution_af_out_of_range() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.distribution_af = 1.5;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("distribution_af"));
+    }
+
+    #[test]
+    fn test_validate_msi_threshold_invalid() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.msi_threshold = 0.0; // must be > MIN_MSI_THRESHOLD (0.0)
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_af_thresholds_empty() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.af_thresholds = vec![];
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_windowed_af_out_of_range() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.windowed_af = 1.5; // out of [0.0, 1.0]
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("windowed_af"));
+    }
+
+    #[test]
+    fn test_validate_sliding_window_zero_with_heatmap_requested() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.plot_heatmap = Some(PathBuf::from("heatmap.vl.json")); // triggers needs_heatmap
+        config.sliding_window = 0;
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_threads_below_minimum() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.threads = Some(0); // MIN_THREAD_COUNT is 1
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_no_output_requested() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+        config.plot_distribution = None; // valid_config's only output source, now cleared
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_set_defaults_detects_linear_scale() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            use_phred: false,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+
+        config.set_defaults().unwrap();
+        assert!(!config.is_phred);
+    }
+
+    #[test]
+    fn test_set_defaults_detects_phred_scale() {
+        let (tmp_vcf, sample_names) = create_test_vcf_named(TestVcfConfig {
+            num_samples: 1,
+            use_phred: true,
+            ..Default::default()
+        });
+        let mut config = valid_config(tmp_vcf.path(), sample_names[0].clone());
+
+        config.set_defaults().unwrap();
+        assert!(config.is_phred);
+    }
 }

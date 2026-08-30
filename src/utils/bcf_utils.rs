@@ -69,6 +69,20 @@ pub(crate) fn get_chrom(record: &bcf::Record, header: &HeaderView) -> Result<Str
     Ok(chrom)
 }
 
+/// Get a sample's index in the VCF/BCF header.
+///
+/// # Returns
+/// * `Ok(idx)` if the sample exists
+/// * `Err(Error::VcfSamplesNotFound)` if it does not
+pub(crate) fn get_sample_index(header: &HeaderView, sample: &str) -> Result<usize> {
+    header.sample_id(sample.as_bytes()).ok_or_else(|| {
+        Error::VcfSamplesNotFound {
+            sample: sample.to_string(),
+        }
+        .into()
+    })
+}
+
 /// Get SVLEN from INFO field or calculate dynamically.
 ///
 /// Returns length difference between ALT and REF alleles.
@@ -1089,6 +1103,39 @@ pub(crate) mod tests {
 
         let svlen = get_svlen(&record, 0, b"A", b"AT").unwrap();
         assert_eq!(svlen, 1); // A -> AT is an insertion, svlen = 1
+    }
+
+    #[test]
+    fn test_get_sample_index_found() {
+        let (tmp_vcf, sample_names) = create_test_vcf(TestVcfConfig {
+            num_samples: 2,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = get_sample_index(header, &sample_names[1]);
+        assert_eq!(result.unwrap(), 1);
+        let result = get_sample_index(header, &sample_names[0]);
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_get_sample_index_missing() {
+        let (tmp_vcf, _) = create_test_vcf(TestVcfConfig {
+            num_samples: 1,
+            ..Default::default()
+        });
+
+        let vcf = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
+        let header = vcf.header();
+
+        let result = get_sample_index(header, "nonexistent_sample");
+
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("nonexistent_sample"));
     }
 
     #[test]
