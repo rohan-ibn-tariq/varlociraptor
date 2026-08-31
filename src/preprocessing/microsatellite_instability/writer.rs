@@ -139,7 +139,13 @@ pub(super) fn write_variant(
     counter: &mut usize,
 ) -> Result<()> {
     let mut output_record = writer.empty_record();
-    output_record.set_rid(variant_info.record.rid());
+
+    let output_rid = writer
+        .header()
+        .name2rid(variant_info.chrom.as_bytes())
+        .expect("chromosome missing from output header - invariant violated, see prepare_header");
+
+    output_record.set_rid(Some(output_rid));
     output_record.set_pos(variant_info.record.pos());
     output_record.set_alleles(&variant_info.record.alleles())?;
 
@@ -185,8 +191,9 @@ mod tests {
 
     use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
     use crate::utils::aux_info::tests::make_aux_collector;
+    use crate::utils::bcf_utils::get_chrom;
     use crate::utils::bcf_utils::tests::{
-        create_test_record, create_test_record_multi_alt, create_test_vcf,
+        create_test_record, create_test_record_multi_alt, create_test_vcf, read_first_record,
         read_first_record_simple, TestVcfConfig,
     };
 
@@ -505,5 +512,43 @@ mod tests {
         assert_eq!(region_ids.len(), 2);
         assert_eq!(region_ids[0], b"chr1:1001-1030");
         assert_eq!(region_ids[1], b"chr1:994-1001");
+    }
+
+    #[test]
+    fn test_write_variant_uses_chrom_field_not_record_rid() {
+        // Output header: chr1=rid0, chr2=rid1.
+        let mut header = bcf::Header::new();
+        header.push_record(br"##fileformat=VCFv4.2");
+        header.push_record(br"##contig=<ID=chr1,length=1000000>");
+        header.push_record(br"##contig=<ID=chr2,length=1000000>");
+        header.push_record(br##"##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="SV length">"##);
+
+        let tmp = NamedTempFile::new().unwrap();
+        let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
+
+        // Record built with rid=0 (chr1 in THIS header) - but its VariantInWindow.chrom
+        // deliberately says "chr2", simulating what happens when the record's
+        // embedded rid no longer matches the output header's contig order.
+        // If write_variant ever uses record.rid() (from input record), this would
+        // wrongly write it as chr1.
+        let record = create_test_record(&writer, 0, 99, b"A", b"AT");
+
+        let variant_info = VariantInWindow {
+            record,
+            chrom: "chr2".to_string(),
+            matching_regions: HashMap::new(),
+            aux_info: AuxInfo::default(),
+        };
+
+        let mut counter = 0;
+        write_variant(&mut writer, variant_info, &mut counter).unwrap();
+        drop(writer);
+
+        let (_, header, record) = read_first_record(tmp.path());
+        let chrom = get_chrom(&record, &header).unwrap();
+        assert_eq!(
+            chrom, "chr2",
+            "should use VariantInWindow.chrom, not record's raw rid"
+        );
     }
 }

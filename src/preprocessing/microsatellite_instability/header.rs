@@ -9,7 +9,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use log::debug;
 use rust_htslib::bcf;
 
 use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER, PREPROCESS_MSI_COPY_FIELDS};
@@ -20,9 +19,11 @@ use crate::utils::ms_bed::collect_bed_chromosomes;
 /// Prepare output VCF header for MSI preprocessing.
 ///
 /// Creates a modified header from the input VCF by:
-/// 1. Copying all existing fields from input header
-/// 2. Adding INFO/REGION_ID field definition
-/// 3. Adding contig definitions for chromosomes present in BED but missing from input VCF
+/// 1. Collecting contig names (input header + any BED-only chromosomes) and
+///    standard INFO field declarations from the input header
+/// 2. Adding INFO/REGION_ID and INFO/MSI_DUMMY field definitions
+/// 3. Writing all contigs in lexicographically sorted order, followed by
+///    the collected INFO field declarations & aux info fields
 ///
 /// # Arguments
 /// * `input_header` - HeaderView from input VCF reader
@@ -31,7 +32,9 @@ use crate::utils::ms_bed::collect_bed_chromosomes;
 ///
 /// # Returns
 /// * `Ok(Header)` - Prepared header ready for writer creation
-/// * `Err` if BED file cannot be read or has no valid regions
+/// * `Err` if BED file cannot be read or has no valid regions, or a standard
+///   INFO field is declared in the input header without all of
+///   Number/Type/Description
 ///
 /// # Example
 /// assert!(prepare_header(&input_vcf.header(), Path::new("ms_regions.bed"), &aux_info_collector).is_ok());
@@ -42,57 +45,86 @@ pub(super) fn prepare_header(
 ) -> Result<bcf::Header> {
     let mut header = bcf::Header::new();
 
-    // Copy Contigs from input header
+    // Copy Contigs & standard INFO field declarations from input header into vectors for later processing
+    // NOTE: Type, Number, Description are required by VCF spec so None case should not occur
+    // with well-formed input.
+    let mut all_contigs: Vec<String> = Vec::new();
+    let mut standard_info_fields: Vec<(String, String, String, String)> = Vec::new();
+
     for rec in input_header.header_records() {
-        if let bcf::header::HeaderRecord::Contig { values, .. } = rec {
-            if let Some(id) = values.get("ID") {
-                header.push_record(format!("##contig=<ID={}>", id).as_bytes());
+        match rec {
+            bcf::header::HeaderRecord::Contig { values, .. } => {
+                if let Some(id) = values.get("ID") {
+                    all_contigs.push(id.clone());
+                }
             }
+            bcf::header::HeaderRecord::Info { values, .. } => {
+                if let Some(id) = values.get("ID") {
+                    if PREPROCESS_MSI_COPY_FIELDS.contains(&id.as_str()) {
+                        match (
+                            values.get("Number"),
+                            values.get("Type"),
+                            values.get("Description"),
+                        ) {
+                            (Some(number), Some(type_), Some(desc)) => {
+                                standard_info_fields.push((
+                                    id.clone(),
+                                    number.clone(),
+                                    type_.clone(),
+                                    desc.clone(),
+                                ));
+                            }
+                            _ => {
+                                return Err(Error::VcfHeaderFieldMissing {
+                                    field: id.clone(),
+                                    location: "INFO".to_string(),
+                                }
+                                .into());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
-    // Add BED chromosomes missing from input
+    // Collect BED chromosomes missing from input
     let bed_chroms = collect_bed_chromosomes(bed_path)?;
 
     if bed_chroms.is_empty() {
         return Err(Error::BedFileNoValidRegions.into());
     }
 
-    for chrom in &bed_chroms {
-        if input_header.name2rid(chrom.as_bytes()).is_err() {
-            let contig_line = format!("##contig=<ID={}>", chrom);
-            header.push_record(contig_line.as_bytes());
-            debug!("Added missing contig to VCF header: {}", chrom);
-        }
+    // Only the BED chromosomes absent from the input header are
+    // added - merged with the input's own contigs BEFORE sorting,
+    // so the final list of contigs in header is in sorted order.
+    let missing_bed_chroms: Vec<String> = bed_chroms
+        .iter()
+        .filter(|chrom| input_header.name2rid(chrom.as_bytes()).is_err())
+        .cloned()
+        .collect();
+
+    all_contigs.extend(missing_bed_chroms);
+    all_contigs.sort();
+
+    for id in &all_contigs {
+        header.push_record(format!("##contig=<ID={}>", id).as_bytes());
     }
 
     // Add MSI-specific INFO fields
     header.push_record(MSI_REGION_ID_HEADER);
     header.push_record(MSI_DUMMY_HEADER);
 
-    // Copy standard INFO field declarations from input header
-    // NOTE: Type, Number, Description are required by VCF spec so None case should not occur
-    // with well-formed input.
-    for rec in input_header.header_records() {
-        if let bcf::header::HeaderRecord::Info { values, .. } = rec {
-            if let Some(id) = values.get("ID") {
-                if PREPROCESS_MSI_COPY_FIELDS.contains(&id.as_str()) {
-                    if let (Some(number), Some(type_), Some(desc)) = (
-                        values.get("Number"),
-                        values.get("Type"),
-                        values.get("Description"),
-                    ) {
-                        header.push_record(
-                            format!(
-                                "##INFO=<ID={},Number={},Type={},Description={}>",
-                                id, number, type_, desc
-                            )
-                            .as_bytes(),
-                        );
-                    }
-                }
-            }
-        }
+    // Standard INFO field declarations collected above.
+    for (id, number, type_, desc) in &standard_info_fields {
+        header.push_record(
+            format!(
+                "##INFO=<ID={},Number={},Type={},Description={}>",
+                id, number, type_, desc
+            )
+            .as_bytes(),
+        );
     }
 
     // User-specified propagated fields via --propagate-info-fields
@@ -213,6 +245,34 @@ mod tests {
 
         let count = content.matches("contig=<ID=chr1>").count();
         assert_eq!(count, 1, "chr1 should appear exactly once, not duplicated");
+    }
+
+    #[test]
+    fn test_prepare_header_sorts_contigs_globally() {
+        let vcf_file = create_test_vcf(&["chr3", "chr5"], &[]);
+        let bed_file = create_test_bed(&["chr1", "chr12", "chr13", "chr4"]);
+        let aux = make_aux_collector(vcf_file.path(), &[]);
+
+        let reader = bcf::Reader::from_path(vcf_file.path()).unwrap();
+        let result = prepare_header(reader.header(), bed_file.path(), &aux).unwrap();
+        let content = header_to_string(&result);
+
+        let expected_order = ["chr1", "chr12", "chr13", "chr3", "chr4", "chr5"];
+        let positions: Vec<usize> = expected_order
+            .iter()
+            .map(|chrom| {
+                content
+                    .find(&format!("contig=<ID={}>", chrom))
+                    .unwrap_or_else(|| panic!("{} not found in header", chrom))
+            })
+            .collect();
+
+        assert!(
+            positions.windows(2).all(|w| w[0] < w[1]),
+            "contigs not in lexicographic order: expected {:?}, got positions {:?}",
+            expected_order,
+            positions
+        );
     }
 
     #[test]
