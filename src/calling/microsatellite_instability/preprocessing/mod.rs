@@ -54,7 +54,7 @@ pub struct PreprocessMSIConfig {
     /// Path to candidate VCF/BCF file (sorted) with variant calls (gnomAD-annotated with INFO/HETEROZYGOSITY).
     pub candidate_vcf: PathBuf,
     /// Output file path. Format/compression is inferred from the extension
-    /// - see `determine_output_format`'s doc for the full list. If omitted,
+    /// (see `determine_output_format`'s doc for the full list). If omitted,
     /// writes uncompressed VCF to STDOUT.
     /// Note: output BCF/VCF.GZ is always compressed; there is currently no
     /// option to request uncompressed BCF.
