@@ -14,6 +14,7 @@
 //! 2. Function to extract sample names from VCF header: https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L55
 //! 3. Function to get combined probability that variant is absent (artifact): https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L161
 //! 4. Function to extract per-sample allele frequencies for a specific ALT allele: https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L258
+//! 5. Function to get SVLEN from INFO field or calculate dynamically: https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L98
 //!
 
 use std::path::Path;
@@ -29,7 +30,6 @@ use crate::constants::{
     MSI_INFO_PROB_EVENT_FIELD_TYPE,
 };
 use crate::errors::Error;
-use crate::utils::genomics::calculate_dynamic_svlen;
 use crate::utils::is_phred_scaled;
 use crate::utils::stats::phred_to_prob;
 
@@ -81,40 +81,6 @@ pub(crate) fn get_sample_index(header: &HeaderView, sample: &str) -> Result<usiz
         }
         .into()
     })
-}
-
-/// Get SVLEN from INFO field or calculate dynamically.
-///
-/// Returns length difference between ALT and REF alleles.
-/// (above referes to SVLEN, not simple length difference)
-/// Positive = insertion, Negative = deletion.
-///
-/// # Arguments
-/// * `record` - VCF record
-/// * `alt_idx` - Index into ALT alleles (0 = first ALT)
-/// * `ref_seq` - Reference allele sequence
-/// * `alt_seq` - Alternate allele sequence
-///
-/// # Example
-/// REF=ACAG, ALT=ACAGCAG : SVLEN=+3
-/// assert_eq!(get_svlen(&record, 0, b"ACAG", b"ACAGCAG").unwrap(), 3);
-pub(crate) fn get_svlen(
-    record: &bcf::Record,
-    alt_idx: usize,
-    ref_seq: &[u8],
-    alt_seq: &[u8],
-) -> Result<i32> {
-    // Try to get SVLEN from INFO field first
-    if let Ok(Some(svlens)) = record.info(b"SVLEN").integer() {
-        if let Some(&svlen) = svlens.get(alt_idx) {
-            if !svlen.is_missing() {
-                return Ok(svlen);
-            }
-        }
-    }
-
-    // Fallback: calculate dynamically using anchor detection
-    Ok(calculate_dynamic_svlen(ref_seq, alt_seq))
 }
 
 /// Combine probabilities for user-specified events into
@@ -1091,7 +1057,7 @@ pub(crate) mod tests {
     /* ==== BCF Extraction Function(s) tests ========= */
 
     #[test]
-    fn test_get_chrom_and_svlen() {
+    fn test_get_chrom() {
         let (tmp_vcf, _) = create_test_vcf(TestVcfConfig::default());
 
         let mut reader = bcf::Reader::from_path(tmp_vcf.path()).unwrap();
@@ -1100,9 +1066,6 @@ pub(crate) mod tests {
 
         let chrom = get_chrom(&record, &header).unwrap();
         assert_eq!(chrom, "chr1");
-
-        let svlen = get_svlen(&record, 0, b"A", b"AT").unwrap();
-        assert_eq!(svlen, 1); // A -> AT is an insertion, svlen = 1
     }
 
     #[test]
