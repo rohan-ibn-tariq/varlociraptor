@@ -502,10 +502,8 @@ fn calculate_msi_metrics(
             let total_f64 = usize_to_f64_exact(total_regions);
             let lower_k = (k_map_f64 - std_dev_f64).max(0.0);
             let upper_k = (k_map_f64 + std_dev_f64).min(total_f64);
-            let lower_percentage = (lower_k / total_f64) * 100.0;
-            let upper_percentage = (upper_k / total_f64) * 100.0;
-            let lower = lower_percentage.max(0.0).min(100.0);
-            let upper = upper_percentage.max(0.0).min(100.0);
+            let lower = (lower_k / total_f64) * 100.0;
+            let upper = (upper_k / total_f64) * 100.0;
 
             (
                 Some(k_map_raw),
