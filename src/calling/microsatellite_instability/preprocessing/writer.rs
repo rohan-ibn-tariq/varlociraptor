@@ -14,10 +14,8 @@ use rust_htslib::bcf::{self, Writer};
 use std::collections::HashMap;
 
 use crate::constants::{
-    MSI_DUMMY_HEADER, MSI_DUMMY_TAG, MSI_REGION_ID_HEADER, MSI_REGION_ID_TAG,
-    PREPROCESS_MSI_COPY_FIELDS, PREPROCESS_MSI_OMIT_AUX,
+    MSI_DUMMY_TAG, MSI_REGION_ID_TAG, PREPROCESS_MSI_COPY_FIELDS, PREPROCESS_MSI_OMIT_AUX,
 };
-use crate::errors::Error;
 use crate::utils::aux_info::AuxInfo;
 use crate::utils::bcf_utils::copy_info_fields;
 use crate::utils::ms_bed::BedRegion;
