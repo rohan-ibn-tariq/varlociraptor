@@ -35,6 +35,9 @@ extern crate paste;
 #[macro_use]
 pub(crate) mod macros;
 pub mod calling;
+pub use calling::microsatellite_instability::preprocessing::{
+    preprocess_ms_candidates, PreprocessMSIConfig,
+};
 pub use calling::microsatellite_instability::{call_msi, MSIConfig};
 pub mod candidates;
 pub mod cli;
@@ -44,10 +47,6 @@ pub(crate) mod errors;
 pub(crate) mod estimation;
 pub mod filtration;
 pub(crate) mod grammar;
-pub(crate) mod preprocessing;
-pub use preprocessing::microsatellite_instability::{
-    preprocess_ms_candidates, PreprocessMSIConfig,
-};
 pub(crate) mod reference;
 pub mod testcase;
 pub mod utils;

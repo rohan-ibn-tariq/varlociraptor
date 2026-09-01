@@ -417,7 +417,7 @@ mod tests {
 
     use tempfile::NamedTempFile;
 
-    use crate::preprocessing::microsatellite_instability::header::prepare_header;
+    use crate::calling::microsatellite_instability::preprocessing::header::prepare_header;
     use crate::utils::aux_info::tests::make_aux_collector;
     use crate::utils::bcf_utils::get_info_strings;
     use crate::utils::bcf_utils::tests::{

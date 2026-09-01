@@ -33,7 +33,6 @@ use crate::{calling, constants};
 //use crate::estimation::tumor_mutational_burden;
 use crate::filtration;
 use crate::grammar;
-use crate::preprocessing;
 use crate::reference;
 use crate::testcase;
 use crate::utils::PathMap;
@@ -1273,12 +1272,13 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     info!("==============================================");
 
                     /* Set up preprocessing configuration */
-                    let config = preprocessing::microsatellite_instability::PreprocessMSIConfig {
-                        microsatellite_bed,
-                        candidate_vcf,
-                        output,
-                        propagate_info_fields,
-                    };
+                    let config =
+                        calling::microsatellite_instability::preprocessing::PreprocessMSIConfig {
+                            microsatellite_bed,
+                            candidate_vcf,
+                            output,
+                            propagate_info_fields,
+                        };
 
                     /* Validate the configuration */
                     info!("----------------------------------------------");
@@ -1287,7 +1287,9 @@ pub fn run(opt: Varlociraptor) -> Result<()> {
                     config.validate()?;
 
                     /* Dispatch preprocessing */
-                    preprocessing::microsatellite_instability::preprocess_ms_candidates(config)?;
+                    calling::microsatellite_instability::preprocessing::preprocess_ms_candidates(
+                        config,
+                    )?;
                 }
             }
         }
