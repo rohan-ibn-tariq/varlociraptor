@@ -16,7 +16,7 @@
 //! 3. `output`      - writes TSV data files and Vega-Lite plot specs for
 //!    distribution, pseudotime, and heatmap outputs.
 //! 4. `preprocessing` - contains the MSI preprocessing pipeline, which is
-//!   used to generate the enriched VCF/BCF that is the input to this module.
+//!    used to generate the enriched VCF/BCF that is the input to this module.
 //!
 
 mod dp_analysis;
