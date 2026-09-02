@@ -316,8 +316,8 @@ mod tests {
     use rust_htslib::bcf::{self, record::Numeric};
     use tempfile::NamedTempFile;
 
+    use crate::constants::test_constants::{TEST_EPSILON_LOOSE, TEST_EPSILON_LOOSE_F32};
     use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
-    use crate::utils::stats::test_constants::{TEST_EPSILON_LOOSE, TEST_EPSILON_LOOSE_F32};
 
     /* ====== Shared header builder =============== */
 

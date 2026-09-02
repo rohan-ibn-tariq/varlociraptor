@@ -715,8 +715,8 @@ pub(crate) mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
+    use crate::constants::test_constants::{TEST_EPSILON, TEST_EPSILON_F32, TEST_EPSILON_LOOSE};
     use crate::utils::genomics::is_indel;
-    use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_F32, TEST_EPSILON_LOOSE};
 
     /// Configuration for test VCF creation
     pub(crate) struct TestVcfConfig<'a> {

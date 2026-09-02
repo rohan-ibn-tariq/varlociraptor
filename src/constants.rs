@@ -8,6 +8,7 @@
 //! Sections of Constants included are:
 //! 1. Generic: Constants - General constants used across the codebase (e.g. default values, thresholds).
 //! 2. MSI: Constants - Microsatellite Instability related constants.
+//! 3. Test: Constants - Floating-point comparison tolerances used only in test code.
 //!
 
 use rust_htslib::bcf::header::{TagLength, TagType};
@@ -22,7 +23,7 @@ use std::collections::HashSet;
 // Use standard_omit_aux_info!() macro instead of a constant for this string.
 
 /// Floating-point tolerance for threshold/equality comparisons in production code
-/// (e.g. checking whether a configured AF value is present in a complete list).
+/// (e.g. checking whether a value is present in a set of expected values).
 pub(crate) const EPSILON: f64 = 1e-9;
 
 /// Minimum thread count for parallel tasks.
@@ -112,4 +113,23 @@ lazy_static! {
     };
 }
 
-/* ================================================ */
+/* =============== TEST: CONSTANTS ================ */
+
+#[cfg(test)]
+pub(crate) mod test_constants {
+    /// Tolerance for floating-point comparisons in tests - f64
+    pub(crate) const TEST_EPSILON: f64 = 1e-6;
+
+    /// Looser tolerance for floating-point comparisons (f64) where accumulated
+    /// rounding error exceeds TEST_EPSILON - e.g. f32 storage round-trips,
+    /// or multi-step probability conversions.
+    pub(crate) const TEST_EPSILON_LOOSE: f64 = 1e-5;
+
+    /// Tolerance for floating-point comparisons in tests - f32
+    pub(crate) const TEST_EPSILON_F32: f32 = 1e-6;
+
+    /// Looser tolerance for floating-point comparisons (f32) where accumulated
+    /// rounding error exceeds TEST_EPSILON - e.g. f32 storage round-trips,
+    /// or multi-step probability conversions.
+    pub(crate) const TEST_EPSILON_LOOSE_F32: f32 = 1e-5;
+}

@@ -852,7 +852,7 @@ pub(super) fn run_af_evolution_analysis(
 mod tests {
     use super::*;
 
-    use crate::utils::stats::test_constants::{TEST_EPSILON, TEST_EPSILON_F32};
+    use crate::constants::test_constants::{TEST_EPSILON, TEST_EPSILON_F32};
 
     /// Create a test Variant with given absence probability and allele frequency.
     fn make_variant(prob: f64, af: f32) -> Variant {
