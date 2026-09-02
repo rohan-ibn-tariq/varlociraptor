@@ -108,7 +108,7 @@ fn write_plot(
     data: Value,
     template: &str,
     path: &Path,
-    threshold: f64,
+    threshold: f32,
     plot_type: PlotType,
     title: &str,
 ) -> Result<()> {
@@ -221,7 +221,7 @@ pub(super) fn write_distribution_data(
     results: &HashMap<String, AfEvolutionResult>,
     sample: &str,
     path: &Path,
-    msi_threshold: f64,
+    msi_threshold: f32,
     distribution_af: f32,
 ) -> Result<()> {
     let file = File::create(path).context("Failed to create Distribution data TSV.")?;
@@ -281,7 +281,7 @@ pub(super) fn generate_distribution_plot_spec(
     results: &HashMap<String, AfEvolutionResult>,
     sample: &str,
     path: &Path,
-    msi_threshold: f64,
+    msi_threshold: f32,
     distribution_af: f32,
 ) -> Result<()> {
     let mut data = Vec::new();
@@ -347,7 +347,7 @@ pub(super) fn write_pseudotime_data(
     results: &HashMap<String, AfEvolutionResult>,
     sample: &str,
     path: &Path,
-    msi_threshold: f64,
+    msi_threshold: f32,
 ) -> Result<()> {
     let file = File::create(path).context("Failed to create Pseudotime data TSV.")?;
     let mut writer = BufWriter::new(file);
@@ -460,7 +460,7 @@ pub(super) fn generate_pseudotime_plot_spec(
     results: &HashMap<String, AfEvolutionResult>,
     sample: &str,
     path: &Path,
-    msi_threshold: f64,
+    msi_threshold: f32,
 ) -> Result<()> {
     let mut data = Vec::new();
 
@@ -539,7 +539,7 @@ pub(super) fn write_heatmap_data(
     results: &[WindowResult],
     sample: &str,
     path: &Path,
-    msi_threshold: f64,
+    msi_threshold: f32,
     windowed_af: f32,
 ) -> Result<()> {
     let file = File::create(path).context("Failed to create heatmap TSV")?;
@@ -603,7 +603,7 @@ pub(super) fn generate_heatmap_plot_spec(
     results: &[WindowResult],
     sample: &str,
     path: &Path,
-    msi_threshold: f64,
+    msi_threshold: f32,
     windowed_af: f32,
 ) -> Result<()> {
     if results.is_empty() {

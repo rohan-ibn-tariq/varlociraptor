@@ -867,11 +867,13 @@ fn test_call_msi_pseudotime_basic() -> Result<()> {
 
     let plot_af_0_0 = data_values
         .iter()
-        .find(|v| (v["af_threshold"].as_f64().unwrap() - 0.0).abs() < EXACT_MATCH_EPSILON)
+        .find(|v| {
+            (v["af_threshold"].as_f64().unwrap() as f32 - 0.0).abs() < EXACT_MATCH_EPSILON as f32
+        })
         .expect("plot should have an af_threshold=0.0 point");
     let plot_msi_score = plot_af_0_0["msi_score"]
         .as_f64()
-        .expect("msi_score should be numeric");
+        .expect("msi_score should be numeric") as f32;
     assert!(
         (plot_msi_score - 66.67).abs() < 0.01,
         "plot msi_score should match TSV at af=0.0"

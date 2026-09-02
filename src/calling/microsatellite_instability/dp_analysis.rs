@@ -48,7 +48,7 @@ struct RegionProbability {
 #[derive(Debug, Serialize)]
 pub(super) struct DpResult {
     pub k: usize,
-    pub msi_score: f64,
+    pub msi_score: f32,
     pub probability: f64,
 }
 
@@ -65,13 +65,13 @@ pub(super) struct AfEvolutionResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub k_map: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub msi_score_map: Option<f64>,
+    pub msi_score_map: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regions_af_pass: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub uncertainty_lower: Option<f64>,
+    pub uncertainty_lower: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub uncertainty_upper: Option<f64>,
+    pub uncertainty_upper: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub map_std_dev: Option<f64>,
     // Only computed if distribution output requested AND af_threshold == distribution_af:
@@ -97,7 +97,7 @@ pub(super) struct WindowResult {
     /// Window end position (0-based, exclusive).
     pub window_end: u64,
     /// MSI score for this window (k_map / regions_in_window × 100).
-    pub msi_score: f64,
+    pub msi_score: f32,
     /// P(k=k_map) from DP distribution.
     pub posterior_probability: f64,
     /// Total MS regions in this window - denominator for MSI score.
@@ -169,7 +169,7 @@ pub(super) struct AnalysisConfig<'a> {
     /// Sample name being analyzed.
     pub sample: &'a str,
     /// Threshold (percentage) at or above which a sample is classified MSI-High.
-    pub msi_high_threshold: f64,
+    pub msi_high_threshold: f32,
     /// Allele frequency thresholds to compute pseudotime/distribution analysis data.
     pub af_thresholds: Vec<f32>,
     /// Thread count for the rayon pool (`None` = rayon default).
@@ -416,7 +416,7 @@ fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
 /// `(k_map, msi_score, posterior_probability)` where:
 /// - `msi_score = k_map / total_regions × 100`
 /// - `posterior_probability = P(k=k_map)` - confidence in the estimate
-fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f64, f64) {
+fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f32, f64) {
     let k_map = dist
         .iter()
         .enumerate()
@@ -502,8 +502,8 @@ fn calculate_msi_metrics(
             let total_f64 = usize_to_f64_exact(total_regions);
             let lower_k = (k_map_f64 - std_dev_f64).max(0.0);
             let upper_k = (k_map_f64 + std_dev_f64).min(total_f64);
-            let lower = (lower_k / total_f64) * 100.0;
-            let upper = (upper_k / total_f64) * 100.0;
+            let lower = ((lower_k / total_f64) * 100.0) as f32;
+            let upper = ((upper_k / total_f64) * 100.0) as f32;
 
             (
                 Some(k_map_raw),
@@ -1137,7 +1137,7 @@ mod tests {
         let dist = vec![0.42, 0.46, 0.12];
         let (k_map, score, posterior_probability) = find_map_estimate(&dist, 2);
         assert_eq!(k_map, 1);
-        assert!((score - 50.0).abs() < TEST_EPSILON); // 1/2 × 100
+        assert!((score - 50.0).abs() < TEST_EPSILON_F32); // 1/2 × 100
         assert!((posterior_probability - 0.46).abs() < TEST_EPSILON); // P(k=1)
     }
 
@@ -1166,7 +1166,7 @@ mod tests {
         let dist = vec![0.0, 0.0, 1.0];
         let (k_map, score, posterior_probability) = find_map_estimate(&dist, 2);
         assert_eq!(k_map, 2);
-        assert!((score - 100.0).abs() < TEST_EPSILON);
+        assert!((score - 100.0).abs() < TEST_EPSILON_F32);
         assert!((posterior_probability - 1.0).abs() < TEST_EPSILON);
     }
 
@@ -1177,7 +1177,7 @@ mod tests {
         let dist = vec![0.1, 0.2, 0.7];
         let (k_map, score, posterior_probability) = find_map_estimate(&dist, 10);
         assert_eq!(k_map, 2);
-        assert!((score - 20.0).abs() < TEST_EPSILON);
+        assert!((score - 20.0).abs() < TEST_EPSILON_F32);
         assert!((posterior_probability - 0.7).abs() < TEST_EPSILON);
     }
 
@@ -1389,14 +1389,14 @@ mod tests {
         assert_eq!(results[0].chrom, "chr1");
         assert_eq!(results[0].window_start, 0);
         assert_eq!(results[0].regions_in_window, 2);
-        assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON_F32);
         assert!((results[0].posterior_probability - 0.72).abs() < TEST_EPSILON);
 
         // chr2: 1 region, p_stable=0.3
         // P(1)=0.7 > P(0)=0.3, k_map=1, score=1/1×100=100%, posterior=0.7
         assert_eq!(results[1].chrom, "chr2");
         assert_eq!(results[1].regions_in_window, 1);
-        assert!((results[1].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((results[1].msi_score - 100.0).abs() < TEST_EPSILON_F32);
         assert!((results[1].posterior_probability - 0.7).abs() < TEST_EPSILON);
     }
 
@@ -1455,7 +1455,7 @@ mod tests {
         let results = run_windowed_analysis(&regions, 0.0, 1_000_000);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].regions_in_window, 2);
-        assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((results[0].msi_score - 100.0).abs() < TEST_EPSILON_F32);
     }
 
     #[test]
@@ -1472,7 +1472,7 @@ mod tests {
         let r = &results["0.00"];
         assert_eq!(r.sample, "sample1");
         assert_eq!(r.k_map.unwrap(), 1);
-        assert!((r.msi_score_map.unwrap() - 1.0).abs() < TEST_EPSILON);
+        assert!((r.msi_score_map.unwrap() - 1.0).abs() < TEST_EPSILON_F32);
         assert_eq!(r.regions_af_pass.unwrap(), 1);
     }
 
@@ -1583,7 +1583,7 @@ mod tests {
             "k_map should be 2 with high instability"
         );
         assert!(
-            (af_0_5.msi_score_map.unwrap() - 2.0).abs() < TEST_EPSILON,
+            (af_0_5.msi_score_map.unwrap() - 2.0).abs() < TEST_EPSILON_F32,
             "MSI score should be 2.0%, got {}",
             af_0_5.msi_score_map.unwrap()
         );
@@ -1598,7 +1598,7 @@ mod tests {
             "Both regions should pass AF=0.0 threshold"
         );
         assert_eq!(af_0_0.k_map.unwrap(), 2);
-        assert!((af_0_0.msi_score_map.unwrap() - 2.0).abs() < TEST_EPSILON);
+        assert!((af_0_0.msi_score_map.unwrap() - 2.0).abs() < TEST_EPSILON_F32);
         assert!(af_0_0.uncertainty_lower.is_some());
 
         // Verify no distribution (needs_distribution=false)
@@ -1646,7 +1646,7 @@ mod tests {
         assert_eq!(windows[0].chrom, "chr1");
         assert_eq!(windows[0].window_start, 0);
         assert_eq!(windows[0].regions_in_window, 2);
-        assert!((windows[0].msi_score - 100.0).abs() < TEST_EPSILON);
+        assert!((windows[0].msi_score - 100.0).abs() < TEST_EPSILON_F32);
         assert!((windows[0].posterior_probability - 0.72).abs() < TEST_EPSILON);
     }
 

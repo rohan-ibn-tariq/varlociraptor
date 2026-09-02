@@ -56,7 +56,7 @@ pub struct MSIConfig {
     /// Event names to combine for MSI probability (e.g., ["somatic_tumor", "high_vaf"].
     pub events: Vec<String>,
     /// MSI-High classification threshold (percentage), default: 3.5.
-    pub msi_threshold: f64,
+    pub msi_threshold: f32,
     /// Allele frequency thresholds to consider for AF evolution analysis
     /// when generating pseudotime outputs. (default: [1.0,0.8,0.6,0.4,0.2,0.0])
     /// If no pseudotime outputs are requested, this will be set to [0.0] to optimize computation.

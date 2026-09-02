@@ -40,7 +40,7 @@ pub(crate) const DEFAULT_MSI_THRESHOLD: &str = "3.5";
 ///
 /// MSI thresholds must be positive values. Zero or negative thresholds
 /// are not meaningful for MSI classification.
-pub(crate) const MIN_MSI_THRESHOLD: f64 = 0.0;
+pub(crate) const MIN_MSI_THRESHOLD: f32 = 0.0;
 
 /// Default AF thresholds for MSI evolution analysis.
 /// This list is used to generate pseudo-time series of MSI evolution at

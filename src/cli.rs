@@ -825,7 +825,7 @@ pub enum CallKind {
             default_value = constants::DEFAULT_MSI_THRESHOLD,
             help = "MSI classification threshold (must be > 0.0).",
         )]
-        msi_threshold: f64,
+        msi_threshold: f32,
         #[structopt(
             long = "af-thresholds",
             hidden = true,

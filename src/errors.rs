@@ -223,7 +223,7 @@ pub(crate) enum Error {
         MIN_MSI_THRESHOLD,
         DEFAULT_MSI_THRESHOLD
     )]
-    MsiConfigThresholdInvalid { threshold: f64 },
+    MsiConfigThresholdInvalid { threshold: f32 },
     #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold} for `{field}`")]
     MsiConfigAfThresholdInvalid { field: &'static str, threshold: f32 },
     #[error("af-thresholds list has an invalid threshold: {threshold}")]

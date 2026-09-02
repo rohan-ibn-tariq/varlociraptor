@@ -53,24 +53,24 @@ pub(crate) fn usize_to_f64_exact(value: usize) -> f64 {
     value as f64
 }
 
-/// Calculate percentage as a simple f64 ratio.
+/// Calculate percentage as a simple f32 ratio.
 ///
 /// # Arguments
 /// * `numerator` - Count value (e.g., number of unstable regions)
 /// * `denominator` - Total value (e.g., total number of regions)
 ///
 /// # Returns
-/// * Percentage as f64 in range [0.0, 100.0]
+/// * Percentage as f32 in range [0.0, 100.0]
 /// * Returns 0.0 if denominator is zero (avoiding division by zero)
 ///
 /// # Examples
 /// assert_eq!(calculate_percentage(5, 100), 5.0);`
-pub fn calculate_percentage(numerator: usize, denominator: usize) -> f64 {
+pub fn calculate_percentage(numerator: usize, denominator: usize) -> f32 {
     if denominator == 0 {
         return 0.0;
     }
 
-    (usize_to_f64_exact(numerator) / usize_to_f64_exact(denominator)) * 100.0
+    ((usize_to_f64_exact(numerator) / usize_to_f64_exact(denominator)) * 100.0) as f32
 }
 
 #[cfg(test)]
