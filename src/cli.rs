@@ -82,6 +82,7 @@ pub(crate) fn validate_vcf_file(path: &Path) -> Result<()> {
 
     if filename.ends_with(".vcf")
         || filename.ends_with(".vcf.gz")
+        || filename.ends_with(".vcf.bgz")
         || filename.ends_with(".bcf")
         || filename.ends_with(".bcf.gz")
     {
@@ -822,7 +823,7 @@ pub enum CallKind {
         events: Vec<String>,
         #[structopt(
             long,
-            default_value = constants::DEFAULT_MSI_THRESHOLD,
+            default_value = constants::MSI_DEFAULT_THRESHOLD,
             help = "MSI classification threshold (must be > 0.0).",
         )]
         msi_threshold: f32,

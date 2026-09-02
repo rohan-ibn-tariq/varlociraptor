@@ -31,7 +31,7 @@ use log::info;
 use rust_htslib::bcf::{self, header::HeaderView, Read};
 
 use crate::cli::{validate_thread_count, validate_vcf_file};
-use crate::constants::{EPSILON, MIN_MSI_THRESHOLD};
+use crate::constants::{EPSILON, MSI_MIN_THRESHOLD};
 use crate::errors::Error;
 use crate::utils::bcf_utils::{
     get_sample_index, is_phred_scaled_from_path, validate_events_exist,
@@ -139,7 +139,7 @@ impl MSIConfig {
         validate_events_exist(&header, &self.events)?;
 
         // --- msi_threshold ---
-        if self.msi_threshold <= MIN_MSI_THRESHOLD {
+        if self.msi_threshold <= MSI_MIN_THRESHOLD {
             return Err(Error::MsiConfigThresholdInvalid {
                 threshold: self.msi_threshold,
             }

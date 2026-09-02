@@ -35,13 +35,13 @@ pub(crate) const MIN_THREAD_COUNT: usize = 1;
 ///
 /// Variants with MSI score >= this threshold are classified as MSI-High.
 /// This is the standard clinical cutoff used in MSI analysis.
-pub(crate) const DEFAULT_MSI_THRESHOLD: &str = "3.5";
+pub(crate) const MSI_DEFAULT_THRESHOLD: &str = "3.5";
 
 /// Minimum allowed MSI threshold (percentage).
 ///
 /// MSI thresholds must be positive values. Zero or negative thresholds
 /// are not meaningful for MSI classification.
-pub(crate) const MIN_MSI_THRESHOLD: f32 = 0.0;
+pub(crate) const MSI_MIN_THRESHOLD: f32 = 0.0;
 
 /// Default AF thresholds for MSI evolution analysis.
 /// This list is used to generate pseudo-time series of MSI evolution at

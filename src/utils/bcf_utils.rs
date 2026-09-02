@@ -9,7 +9,7 @@
 //! 4. VCF/BCF fields validation
 //! 5. VCF file validation
 //!
-//! NOTE: Helpful General Data Structs or functions can be found in following PR:
+//! NOTE: Helpful General Data Structs or functions (that can be copied) can be found in following PR:
 //! 1. SampleInfo Struct for samples and their indexes map: https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L34
 //! 2. Function to extract sample names from VCF header: https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L55
 //! 3. Function to get combined probability that variant is absent (artifact): https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/utils/bcf_utils.rs#L161

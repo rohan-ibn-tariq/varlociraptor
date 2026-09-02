@@ -64,7 +64,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::constants::{DEFAULT_MSI_THRESHOLD, MIN_MSI_THRESHOLD, MIN_THREAD_COUNT};
+use crate::constants::{MIN_THREAD_COUNT, MSI_DEFAULT_THRESHOLD, MSI_MIN_THRESHOLD};
 
 #[derive(Error, Debug, PartialEq)]
 pub(crate) enum Error {
@@ -220,8 +220,8 @@ pub(crate) enum Error {
     /* -------------------- Configuration ---------------------------- */
     #[error(
         "invalid MSI threshold: must be > {} (default: {}), got {threshold}",
-        MIN_MSI_THRESHOLD,
-        DEFAULT_MSI_THRESHOLD
+        MSI_MIN_THRESHOLD,
+        MSI_DEFAULT_THRESHOLD
     )]
     MsiConfigThresholdInvalid { threshold: f32 },
     #[error("invalid AF threshold: must be in [0.0, 1.0], got {threshold} for `{field}`")]
