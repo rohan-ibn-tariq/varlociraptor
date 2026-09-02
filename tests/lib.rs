@@ -13,6 +13,7 @@ use itertools::Itertools;
 use rust_htslib::bcf::{self, Read, Reader};
 use varlociraptor::utils::bcf_utils;
 use varlociraptor::{testcase, testcase_should_panic};
+use varlociraptor::{MSI_DUMMY_TAG, MSI_REGION_ID_TAG};
 
 testcase!(test01, exact, fast);
 testcase!(test02, exact, fast);
@@ -500,15 +501,15 @@ fn test_preprocess_msi_basic_annotation() -> Result<()> {
 
     assert_eq!(records.len(), 1, "Expected 1 record total");
     assert!(
-        bcf_utils::record_has_info_string(&records[0], b"REGION_ID"),
+        bcf_utils::record_has_info_string(&records[0], MSI_REGION_ID_TAG),
         "Real variant should have REGION_ID"
     );
     assert!(
-        !bcf_utils::record_has_info_flag(&records[0], b"MSI_DUMMY"),
+        !bcf_utils::record_has_info_flag(&records[0], MSI_DUMMY_TAG),
         "Should NOT have MSI_DUMMY flag"
     );
     assert_eq!(
-        bcf_utils::get_info_strings(&records[0], b"REGION_ID")
+        bcf_utils::get_info_strings(&records[0], MSI_REGION_ID_TAG)
             .and_then(|v| v.into_iter().next())
             .unwrap(),
         "chr1:94-124",
@@ -527,22 +528,22 @@ fn test_preprocess_msi_dummy_injection() -> Result<()> {
 
     let dummies: Vec<_> = records
         .iter()
-        .filter(|r| bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .filter(|r| bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
     let non_dummies: Vec<_> = records
         .iter()
-        .filter(|r| !bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .filter(|r| !bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
 
     assert_eq!(dummies.len(), 1, "Expected exactly 1 dummy");
     assert_eq!(non_dummies.len(), 1, "Expected exactly 1 original SNV");
 
     assert!(
-        bcf_utils::record_has_info_string(dummies[0], b"REGION_ID"),
+        bcf_utils::record_has_info_string(dummies[0], MSI_REGION_ID_TAG),
         "Dummy should have REGION_ID"
     );
     assert_eq!(
-        bcf_utils::get_info_strings(dummies[0], b"REGION_ID")
+        bcf_utils::get_info_strings(dummies[0], MSI_REGION_ID_TAG)
             .and_then(|v| v.into_iter().next())
             .unwrap(),
         "chr1:94-124"
@@ -550,11 +551,11 @@ fn test_preprocess_msi_dummy_injection() -> Result<()> {
     assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
 
     assert!(
-        !bcf_utils::record_has_info_string(non_dummies[0], b"REGION_ID"),
+        !bcf_utils::record_has_info_string(non_dummies[0], MSI_REGION_ID_TAG),
         "SNV should NOT have REGION_ID"
     );
     assert!(
-        !bcf_utils::record_has_info_flag(non_dummies[0], b"MSI_DUMMY"),
+        !bcf_utils::record_has_info_flag(non_dummies[0], MSI_DUMMY_TAG),
         "SNV should NOT have MSI_DUMMY flag"
     );
 
@@ -574,22 +575,22 @@ fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
 
     let dummies: Vec<_> = records
         .iter()
-        .filter(|r| bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .filter(|r| bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
     let non_dummies: Vec<_> = records
         .iter()
-        .filter(|r| !bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .filter(|r| !bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
 
     assert_eq!(dummies.len(), 1, "Expected 1 dummy");
     assert_eq!(non_dummies.len(), 1, "Expected 1 imperfect indel");
 
     assert!(
-        bcf_utils::record_has_info_string(dummies[0], b"REGION_ID"),
+        bcf_utils::record_has_info_string(dummies[0], MSI_REGION_ID_TAG),
         "Dummy should have REGION_ID"
     );
     assert_eq!(
-        bcf_utils::get_info_strings(dummies[0], b"REGION_ID")
+        bcf_utils::get_info_strings(dummies[0], MSI_REGION_ID_TAG)
             .and_then(|v| v.into_iter().next())
             .unwrap(),
         "chr1:94-124"
@@ -597,11 +598,11 @@ fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
     assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
 
     assert!(
-        !bcf_utils::record_has_info_string(non_dummies[0], b"REGION_ID"),
+        !bcf_utils::record_has_info_string(non_dummies[0], MSI_REGION_ID_TAG),
         "Imperfect indel should NOT have REGION_ID"
     );
     assert!(
-        !bcf_utils::record_has_info_flag(non_dummies[0], b"MSI_DUMMY"),
+        !bcf_utils::record_has_info_flag(non_dummies[0], MSI_DUMMY_TAG),
         "Imperfect indel should NOT have MSI_DUMMY flag"
     );
 
@@ -622,26 +623,26 @@ fn test_preprocess_msi_multi_region() -> Result<()> {
     let annotated: Vec<_> = records
         .iter()
         .filter(|r| {
-            bcf_utils::record_has_info_string(r, b"REGION_ID")
-                && !bcf_utils::record_has_info_flag(r, b"MSI_DUMMY")
+            bcf_utils::record_has_info_string(r, MSI_REGION_ID_TAG)
+                && !bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG)
         })
         .collect();
     let dummies: Vec<_> = records
         .iter()
-        .filter(|r| bcf_utils::record_has_info_flag(r, b"MSI_DUMMY"))
+        .filter(|r| bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
 
     assert_eq!(annotated.len(), 1, "Expected 1 annotated real variant");
     assert_eq!(dummies.len(), 1, "Expected 1 dummy for second region");
 
     assert_eq!(
-        bcf_utils::get_info_strings(annotated[0], b"REGION_ID")
+        bcf_utils::get_info_strings(annotated[0], MSI_REGION_ID_TAG)
             .and_then(|v| v.into_iter().next())
             .unwrap(),
         "chr1:94-124"
     );
     assert_eq!(
-        bcf_utils::get_info_strings(dummies[0], b"REGION_ID")
+        bcf_utils::get_info_strings(dummies[0], MSI_REGION_ID_TAG)
             .and_then(|v| v.into_iter().next())
             .unwrap(),
         "chr1:200-230"

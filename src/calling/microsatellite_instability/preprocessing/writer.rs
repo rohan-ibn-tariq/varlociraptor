@@ -13,9 +13,7 @@ use anyhow::Result;
 use rust_htslib::bcf::{self, Writer};
 use std::collections::HashMap;
 
-use crate::constants::{
-    MSI_DUMMY_TAG, MSI_REGION_ID_TAG, PREPROCESS_MSI_COPY_FIELDS, PREPROCESS_MSI_OMIT_AUX,
-};
+use crate::constants::{MSI_COPY_FIELDS, MSI_DUMMY_TAG, MSI_OMIT_AUX, MSI_REGION_ID_TAG};
 use crate::utils::aux_info::AuxInfo;
 use crate::utils::bcf_utils::copy_info_fields;
 use crate::utils::ms_bed::BedRegion;
@@ -43,7 +41,7 @@ pub(super) struct VariantInWindow {
     pub matching_regions: HashMap<usize, String>,
     /// User-specified INFO fields collected from input record.
     /// Written to output via aux_info.write() during write_variant.
-    /// Fields in PREPROCESS_MSI_OMIT_AUX are excluded to prevent
+    /// Fields in MSI_OMIT_AUX are excluded to prevent
     /// double-writing with copy_info_fields().
     pub aux_info: AuxInfo,
 }
@@ -147,15 +145,11 @@ pub(super) fn write_variant(
     output_record.set_pos(variant_info.record.pos());
     output_record.set_alleles(&variant_info.record.alleles())?;
 
-    copy_info_fields(
-        &variant_info.record,
-        &mut output_record,
-        &PREPROCESS_MSI_COPY_FIELDS,
-    )?;
+    copy_info_fields(&variant_info.record, &mut output_record, &MSI_COPY_FIELDS)?;
 
     variant_info
         .aux_info
-        .write(&mut output_record, &PREPROCESS_MSI_OMIT_AUX)?;
+        .write(&mut output_record, &MSI_OMIT_AUX)?;
 
     let n_alts = output_record.allele_count() as usize - 1;
     let region_id_bytes: Vec<&[u8]> = (0..n_alts)
@@ -202,8 +196,8 @@ mod tests {
         let mut header = bcf::Header::new();
         header.push_record(br"##fileformat=VCFv4.2");
         header.push_record(br"##contig=<ID=chr1,length=1000000>");
-        header.push_record(MSI_REGION_ID_HEADER);
-        header.push_record(MSI_DUMMY_HEADER);
+        header.push_record(MSI_REGION_ID_HEADER.as_bytes());
+        header.push_record(MSI_DUMMY_HEADER.as_bytes());
         header
     }
 
@@ -233,7 +227,7 @@ mod tests {
         assert_eq!(alleles[0], b"GCAG", "REF: anchor G + motif CAG");
         assert_eq!(alleles[1], b"G", "ALT: just anchor G");
 
-        let region_id = record.info(b"REGION_ID").string().unwrap();
+        let region_id = record.info(MSI_REGION_ID_TAG).string().unwrap();
         assert_eq!(region_id.as_ref().unwrap()[0], b"chr1:1000-1021");
     }
 
@@ -333,7 +327,7 @@ mod tests {
 
         let (_reader, record) = read_first_record_simple(tmp.path());
 
-        let region_id = record.info(b"REGION_ID").string().unwrap();
+        let region_id = record.info(MSI_REGION_ID_TAG).string().unwrap();
         assert!(region_id.is_some());
         assert_eq!(region_id.unwrap()[0], b"chr1:1000-1020");
     }
@@ -361,7 +355,7 @@ mod tests {
 
         let (_reader, record) = read_first_record_simple(tmp.path());
 
-        let region_id = record.info(b"REGION_ID").string().unwrap();
+        let region_id = record.info(MSI_REGION_ID_TAG).string().unwrap();
         assert!(region_id.is_none());
 
         assert_eq!(record.pos(), 2000);
@@ -378,7 +372,7 @@ mod tests {
 
         let mut record = create_test_record(&writer, 0, 2000, b"A", b"T");
         record
-            .push_info_string(b"REGION_ID", &[b"old:value"])
+            .push_info_string(MSI_REGION_ID_TAG, &[b"old:value"])
             .unwrap();
 
         let variant_info = VariantInWindow {
@@ -396,7 +390,7 @@ mod tests {
 
         let (_reader, record) = read_first_record_simple(tmp.path());
 
-        let region_id = record.info(b"REGION_ID").string().unwrap();
+        let region_id = record.info(MSI_REGION_ID_TAG).string().unwrap();
         assert!(region_id.is_none(), "REGION_ID should be removed");
     }
 
@@ -408,7 +402,7 @@ mod tests {
 
         let mut record = create_test_record(&writer, 0, 1000, b"ACAG", b"ACAGCAG");
         record
-            .push_info_string(b"REGION_ID", &[b"old:value"])
+            .push_info_string(MSI_REGION_ID_TAG, &[b"old:value"])
             .unwrap();
 
         let variant_info = VariantInWindow {
@@ -430,7 +424,7 @@ mod tests {
 
         let (_reader, record) = read_first_record_simple(tmp.path());
 
-        let region_id = record.info(b"REGION_ID").string().unwrap().unwrap();
+        let region_id = record.info(MSI_REGION_ID_TAG).string().unwrap().unwrap();
         assert_eq!(region_id.len(), 1);
         assert_eq!(region_id[0], b"chr1:1000-1020");
     }
@@ -505,7 +499,7 @@ mod tests {
         assert_eq!(counter, 1);
 
         let (_reader, record) = read_first_record_simple(tmp.path());
-        let region_ids = record.info(b"REGION_ID").string().unwrap().unwrap();
+        let region_ids = record.info(MSI_REGION_ID_TAG).string().unwrap().unwrap();
 
         assert_eq!(region_ids.len(), 2);
         assert_eq!(region_ids[0], b"chr1:1001-1030");

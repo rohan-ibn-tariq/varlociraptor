@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::Result;
 use rust_htslib::bcf;
 
-use crate::constants::{MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER, PREPROCESS_MSI_COPY_FIELDS};
+use crate::constants::{MSI_COPY_FIELDS, MSI_DUMMY_HEADER, MSI_REGION_ID_HEADER};
 use crate::errors::Error;
 use crate::utils::aux_info::AuxInfoCollector;
 use crate::utils::ms_bed::collect_bed_chromosomes;
@@ -60,7 +60,7 @@ pub(super) fn prepare_header(
             }
             bcf::header::HeaderRecord::Info { values, .. } => {
                 if let Some(id) = values.get("ID") {
-                    if PREPROCESS_MSI_COPY_FIELDS.contains(&id.as_str()) {
+                    if MSI_COPY_FIELDS.contains(&id.as_str()) {
                         match (
                             values.get("Number"),
                             values.get("Type"),
@@ -113,8 +113,8 @@ pub(super) fn prepare_header(
     }
 
     // Add MSI-specific INFO fields
-    header.push_record(MSI_REGION_ID_HEADER);
-    header.push_record(MSI_DUMMY_HEADER);
+    header.push_record(MSI_REGION_ID_HEADER.as_bytes());
+    header.push_record(MSI_DUMMY_HEADER.as_bytes());
 
     // Standard INFO field declarations collected above.
     for (id, number, type_, desc) in &standard_info_fields {

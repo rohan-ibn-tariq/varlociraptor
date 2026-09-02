@@ -25,7 +25,7 @@ macro_rules! standard_omit_aux_info {
 /// MSI-specific INFO fields always propagated in MSI preprocessing,
 /// extending the standard fields with MSI-required fields.
 #[macro_export]
-macro_rules! preprocess_msi_omit_aux_info {
+macro_rules! msi_omit_aux_info {
     () => {
         concat!(standard_omit_aux_info!(), ", HETEROZYGOSITY")
     };

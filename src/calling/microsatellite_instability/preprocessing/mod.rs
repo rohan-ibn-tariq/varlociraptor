@@ -130,7 +130,7 @@ impl PreprocessMSIConfig {
         if self.propagate_info_fields.is_empty() {
             info!(
                 "Propagate INFO fields: none (standard fields only, if present: {})",
-                preprocess_msi_omit_aux_info!()
+                msi_omit_aux_info!()
             );
         } else {
             info!(

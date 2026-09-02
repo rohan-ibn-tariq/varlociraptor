@@ -42,6 +42,7 @@ pub use calling::microsatellite_instability::{call_msi, MSIConfig};
 pub mod candidates;
 pub mod cli;
 pub(crate) mod constants;
+pub use constants::{MSI_DUMMY_TAG, MSI_REGION_ID_TAG};
 pub(crate) mod conversion;
 pub(crate) mod errors;
 pub(crate) mod estimation;

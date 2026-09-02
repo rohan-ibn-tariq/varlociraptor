@@ -469,7 +469,7 @@ pub enum PreprocessKind {
             long,
             help = concat!(
                 "Additional INFO fields to propagate. Standard fields (",
-                preprocess_msi_omit_aux_info!(),
+                msi_omit_aux_info!(),
                 ") are always propagated automatically."
             )
         )]

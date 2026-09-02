@@ -50,28 +50,16 @@ pub(crate) const MIN_MSI_THRESHOLD: f32 = 0.0;
 /// AF Thresholds.
 pub(crate) const MSI_DEFAULT_AF_THRESHOLDS: &str = msi_default_af_thresholds!();
 
-/// INFO fields injected by MSI preprocessing output.
-/// Added to omit set to prevent double-writing via --propagate-info-fields.
-pub(crate) const MSI_OUTPUT_INFO_FIELDS: &[&str] = &["REGION_ID", "MSI_DUMMY"];
-
 /// Sliding window size (bp) for regional MSI heatmap analysis.
 pub(crate) const MSI_DEFAULT_SLIDING_WINDOW_SIZE: &str = "1000000";
 
 /// INFO field tag for MSI region annotation.
 /// Added to variants overlapping a microsatellite region.
-pub(crate) const MSI_REGION_ID_TAG: &[u8] = b"REGION_ID";
+pub const MSI_REGION_ID_TAG: &[u8] = b"REGION_ID";
 
 /// INFO field tag for dummy deletion flag.
 /// Set on synthetic records injected for MS regions without observed indels.
-pub(crate) const MSI_DUMMY_TAG: &[u8] = b"MSI_DUMMY";
-
-/// Full VCF header declaration for REGION_ID INFO field.
-pub(crate) const MSI_REGION_ID_HEADER: &[u8] =
-    br##"##INFO=<ID=REGION_ID,Number=A,Type=String,Description="BED region ID for the overlapping microsatellite locus">"##;
-
-/// Full VCF header declaration for MSI_DUMMY INFO field.
-pub(crate) const MSI_DUMMY_HEADER: &[u8] =
-    br##"##INFO=<ID=MSI_DUMMY,Number=0,Type=Flag,Description="Dummy deletion injected for MS region with no observed indel">"##;
+pub const MSI_DUMMY_TAG: &[u8] = b"MSI_DUMMY";
 
 /// Default AF threshold for full distribution output.
 /// Variants with AF >= this threshold are included in the full distribution output.
@@ -94,20 +82,38 @@ pub(crate) const MSI_FORMAT_AF_FIELD_TYPE: TagType = TagType::Float;
 pub(crate) const MSI_FORMAT_AF_FIELD_LENGTH: TagLength = TagLength::AltAlleles;
 
 lazy_static! {
+    /// Full VCF header declaration for REGION_ID INFO field.
+    /// Derived from MSI_REGION_ID_TAG.
+    pub(crate) static ref MSI_REGION_ID_HEADER: String = format!(
+        "##INFO=<ID={},Number=A,Type=String,Description=\"BED region ID for the overlapping microsatellite locus\">",
+        std::str::from_utf8(MSI_REGION_ID_TAG).unwrap()
+    );
+
+    /// Full VCF header declaration for MSI_DUMMY INFO field.
+    /// Derived from MSI_DUMMY_TAG.
+    pub(crate) static ref MSI_DUMMY_HEADER: String = format!(
+        "##INFO=<ID={},Number=0,Type=Flag,Description=\"Dummy deletion injected for MS region with no observed indel\">",
+        std::str::from_utf8(MSI_DUMMY_TAG).unwrap()
+    );
+
     /// INFO fields copied explicitly from input to output in MSI preprocessing.
-    /// Derived from preprocess_msi_omit_aux_info!() macro.
-    pub(crate) static ref PREPROCESS_MSI_COPY_FIELDS: Vec<&'static str> =
-        preprocess_msi_omit_aux_info!()
+    /// Derived from msi_omit_aux_info!() macro.
+    pub(crate) static ref MSI_COPY_FIELDS: Vec<&'static str> =
+        msi_omit_aux_info!()
             .split(", ")
             .collect();
 
     /// INFO fields omitted from aux_info.write() in MSI preprocessing.
     /// Combines standard propagated fields with MSI-specific output fields
     /// to prevent double-writing.
-    pub(crate) static ref PREPROCESS_MSI_OMIT_AUX: HashSet<Vec<u8>> = {
-        preprocess_msi_omit_aux_info!()
+    pub(crate) static ref MSI_OMIT_AUX: HashSet<Vec<u8>> = {
+        let msi_output_fields = [
+            std::str::from_utf8(MSI_REGION_ID_TAG).unwrap(),
+            std::str::from_utf8(MSI_DUMMY_TAG).unwrap(),
+        ];
+        msi_omit_aux_info!()
             .split(", ")
-            .chain(MSI_OUTPUT_INFO_FIELDS.iter().copied())
+            .chain(msi_output_fields.iter().copied())
             .map(|s| s.as_bytes().to_vec())
             .collect()
     };

@@ -329,8 +329,8 @@ mod tests {
         header.push_record(br#"##fileformat=VCFv4.2"#);
         header.push_record(br#"##contig=<ID=chr1,length=10000000>"#);
         header.push_record(br#"##contig=<ID=chr2,length=10000000>"#);
-        header.push_record(MSI_REGION_ID_HEADER);
-        header.push_record(MSI_DUMMY_HEADER);
+        header.push_record(MSI_REGION_ID_HEADER.as_bytes());
+        header.push_record(MSI_DUMMY_HEADER.as_bytes());
         header.push_record(
             br##"##INFO=<ID=PROB_SOMATIC,Number=A,Type=Float,Description="P(somatic)">"##,
         );
