@@ -299,7 +299,7 @@ pub(super) fn extract_regions(
 
             // prob_absent = 1 - P(events).
             regions[region_idx].variants.push(Variant {
-                prob_absent: (1.0 - prob_events).max(0.0),
+                prob_absent: 1.0 - prob_events,
                 af,
             });
         }
