@@ -630,9 +630,12 @@ fn run_windowed_analysis(
         function is only called when needs_heatmap is true"
     );
 
-    if regions.is_empty() {
-        return Vec::new();
-    }
+    debug_assert!(
+        !regions.is_empty(),
+        "regions=[] guaranteed unreachable: call_msi returns MsiBedRegionsEmpty before \
+        reaching run_windowed_analysis whenever total_ms_regions == 0, and this function \
+        is only called when needs_heatmap is true"
+    );
 
     // Collect unique chromosomes in first-encounter (genomic) order
     let mut chroms: Vec<&str> = Vec::new();
@@ -1415,10 +1418,10 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "regions=[] guaranteed unreachable")]
     fn test_run_windowed_analysis_empty_regions() {
         let regions: Vec<RegionSummary> = vec![];
-        let results = run_windowed_analysis(&regions, 0.1, 1_000_000);
-        assert!(results.is_empty());
+        run_windowed_analysis(&regions, 0.1, 1_000_000);
     }
 
     #[test]
