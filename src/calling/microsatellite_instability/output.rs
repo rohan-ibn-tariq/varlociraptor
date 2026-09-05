@@ -17,6 +17,10 @@
 //! Each function is called only when the corresponding `OutputRequirements`
 //! flag is set, checked in upstream.
 //!
+//! NOTE: An empty-plot placeholder function (create_empty_plot) was removed
+//! as unreachable dead code - available to copy back if ever needed:
+//! https://github.com/rohan-ibn-tariq/varlociraptor/blob/56278ba1f36f8a89046c3bc9481d502ab7e0b377/src/estimation/microsatellite_instability/output.rs#L26
+//!
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -45,37 +49,6 @@ enum PlotType {
 /* ================================================ */
 
 /* ============ Plotting Utils ==================== */
-
-/// Create empty plot with informative message.
-///
-/// Uses embedded template from `templates/plots/msi_empty.json`.
-/// Replaces "PLACEHOLDER_MESSAGE" with actual message.
-///
-/// # Arguments
-/// * `path` - Output file path
-/// * `message` - Text to display (e.g., "No distribution data available")
-///
-/// # Returns
-/// * `Ok(())` on success
-/// * `Err` if file creation or JSON parsing fails
-fn create_empty_plot(path: &Path, message: &str) -> Result<()> {
-    let template = include_str!("../../../templates/plots/msi_empty.json");
-
-    let mut spec: Value =
-        serde_json::from_str(template).context("Failed to parse empty plot template")?;
-
-    if let Value::Object(ref mut spec_obj) = spec {
-        spec_obj["mark"]["text"] = json!(message);
-    }
-
-    let file = File::create(path).context("Failed to create empty plot file")?;
-    let mut writer = BufWriter::new(file);
-
-    serde_json::to_writer_pretty(&mut writer, &spec).context("Failed to write empty plot")?;
-    writer.flush().context("Failed to flush plot file")?;
-
-    Ok(())
-}
 
 /// Load Vega-Lite template, inject data, apply threshold mutation,
 /// and write pretty-printed JSON to file.
@@ -606,10 +579,6 @@ pub(super) fn generate_heatmap_plot_spec(
     msi_threshold: f32,
     windowed_af: f32,
 ) -> Result<()> {
-    if results.is_empty() {
-        return create_empty_plot(path, "No heatmap data!!");
-    }
-
     let data: Vec<Value> = results
         .iter()
         .map(|r| {
@@ -820,16 +789,6 @@ mod tests {
     /* ====== Heatmap TSV ======================== */
 
     #[test]
-    fn test_write_heatmap_data_empty_writes_header_only() {
-        let tmp = NamedTempFile::new().unwrap();
-        write_heatmap_data(&[], "tumor", tmp.path(), 3.5, 0.05).unwrap();
-
-        let content = fs::read_to_string(tmp.path()).unwrap();
-        assert_eq!(content.lines().count(), 1); // header only
-        assert!(content.contains("chrom"));
-    }
-
-    #[test]
     fn test_write_heatmap_data_row_written() {
         let tmp = NamedTempFile::new().unwrap();
         write_heatmap_data(&make_window_results(), "tumor", tmp.path(), 3.5, 0.05).unwrap();
@@ -862,15 +821,5 @@ mod tests {
             Some(7.5),
             "threshold should replace domain[1]"
         );
-    }
-
-    #[test]
-    fn test_generate_heatmap_plot_empty_produces_placeholder() {
-        let tmp = NamedTempFile::new().unwrap();
-        generate_heatmap_plot_spec(&[], "tumor", tmp.path(), 3.5, 0.05).unwrap();
-
-        let content = fs::read_to_string(tmp.path()).unwrap();
-        assert!(serde_json::from_str::<Value>(&content).is_ok());
-        assert!(content.contains("No heatmap data"));
     }
 }
