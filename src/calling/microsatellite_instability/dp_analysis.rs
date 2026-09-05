@@ -393,11 +393,7 @@ fn run_dp_for_regions(filtered: &FilteredRegions) -> Vec<f64> {
         })
         .collect();
 
-    if region_probs.is_empty() {
-        vec![1.0] // P(0 unstable) = 1.0
-    } else {
-        run_msi_dp(&region_probs)
-    }
+    run_msi_dp(&region_probs)
 }
 
 /// Find MAP estimate, MSI score, and posterior probability from a DP distribution.
