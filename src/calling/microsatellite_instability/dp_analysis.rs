@@ -16,7 +16,7 @@
 //! 9. Orchestrator (`run_af_evolution_analysis`)
 //!
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use log::{info, warn};
@@ -633,12 +633,10 @@ fn run_windowed_analysis(
         is only called when needs_heatmap is true"
     );
 
-    // Collect unique chromosomes in first-encounter (genomic) order
-    let mut chroms: Vec<&str> = Vec::new();
+    // Collect unique chromosomes
+    let mut chroms: HashSet<&str> = HashSet::new();
     for region in regions {
-        if !chroms.contains(&region.chrom.as_str()) {
-            chroms.push(&region.chrom);
-        }
+        chroms.insert(region.chrom.as_str());
     }
 
     // Build (chrom, window_start) work items - single AF
