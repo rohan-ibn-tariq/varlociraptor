@@ -422,10 +422,10 @@ fn find_map_estimate(dist: &[f64], total_regions: usize) -> (usize, f32, f64) {
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
         .map(|(k, _)| k)
-        .unwrap_or(0);
+        .expect("dist is guaranteed non-empty: run_dp_for_regions always returns at least [1.0]");
 
     let msi_score = calculate_percentage(k_map, total_regions);
-    let posterior_probability = dist.get(k_map).copied().unwrap_or(0.0);
+    let posterior_probability = dist[k_map];
 
     (k_map, msi_score, posterior_probability)
 }
