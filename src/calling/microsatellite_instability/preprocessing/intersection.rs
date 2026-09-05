@@ -34,7 +34,7 @@ use crate::utils::genomics::calculate_indel_position;
 use crate::utils::ms_bed::{parse_bed_record, BedRegion};
 
 use super::variant_analysis::should_include_variant;
-use super::writer::{inject_dummy_deletion, write_variant, VariantInWindow};
+use super::writer::{inject_dummy_indels, write_variant, VariantInWindow};
 
 /* ============ Data Structures =================== */
 
@@ -48,8 +48,10 @@ pub(super) struct PreprocessingStats {
     /// VCF records annotated with REGION_ID (counted per record,
     /// not per ALT allele - a multi-ALT record counts as one).
     pub annotated_indels: usize,
-    /// Number of dummy indels injected for MS regions without variants.
-    pub dummy_indels: usize,
+    /// Number of MS regions that received synthetic dummy indels. Each such
+    /// region gets exactly 2 records (one deletion, one insertion) - this
+    /// counts regions, not records; see writer::inject_dummy_indels.
+    pub dummy_regions: usize,
 }
 
 impl PreprocessingStats {
@@ -57,12 +59,12 @@ impl PreprocessingStats {
     /// - Total BED regions processed
     /// - Valid regions (1-6 bp motif)
     /// - Annotated MS indels
-    /// - Dummy indels injected
+    /// - Dummy regions (2 records each)
     pub fn log_stats(&self) {
         info!("  Total BED regions: {}", self.total_regions);
         info!("  Valid regions (1-6bp motif): {}", self.valid_regions);
         info!("  Annotated MS indels: {}", self.annotated_indels);
-        info!("  Dummy indels injected: {}", self.dummy_indels);
+        info!("  Dummy regions (2 records each): {}", self.dummy_regions);
     }
 }
 
@@ -183,7 +185,7 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 /// Streams through sorted VCF variants and BED regions to identify perfect microsatellite
 /// indels. Annotates matching variants with `INFO/REGION_ID` field containing
 /// comma-separated region identifiers for all overlapping regions. Injects dummy
-/// deletions for regions with no observed perfect indels.
+/// indels (deletion + insertion pair) for regions with no observed perfect indels.
 ///
 /// # Algorithm
 /// 1. Stream through BED regions sequentially (bounded memory usage)
@@ -209,7 +211,7 @@ fn variant_overlaps_region(record: &bcf::Record, region: &BedRegion, alt_idx: us
 ///
 /// # Delegation
 /// - Variant filtering: `variant_analysis::should_include_variant`
-/// - VCF writing: `writer::write_variant`, `writer::inject_dummy_deletion`
+/// - VCF writing: `writer::write_variant`, `writer::inject_dummy_indels`
 ///   (the latter panics if a BED chromosome is missing from the header -
 ///   guaranteed not to happen via `prepare_header`)
 ///
@@ -241,7 +243,7 @@ pub(super) fn process_and_annotate(
     let mut total_regions = 0;
     let mut skipped_invalid_regions = 0;
     let mut total_annotated_indels = 0;
-    let mut total_dummy_indels = 0;
+    let mut total_dummy_regions = 0;
     let mut variant_window: VecDeque<WindowEntry> = VecDeque::new();
     let mut seen_any_chrom_overlap = false;
 
@@ -282,7 +284,7 @@ pub(super) fn process_and_annotate(
                 WindowEntry::Real(variant) => {
                     write_variant(writer, variant, &mut total_annotated_indels)?
                 }
-                WindowEntry::Dummy(region) => inject_dummy_deletion(writer, &region)?,
+                WindowEntry::Dummy(region) => inject_dummy_indels(writer, &region)?,
             }
         }
 
@@ -381,7 +383,7 @@ pub(super) fn process_and_annotate(
                 })
                 .unwrap_or(variant_window.len());
             variant_window.insert(insert_at, WindowEntry::Dummy(region));
-            total_dummy_indels += 1;
+            total_dummy_regions += 1;
         }
     }
 
@@ -391,7 +393,7 @@ pub(super) fn process_and_annotate(
             WindowEntry::Real(variant) => {
                 write_variant(writer, variant, &mut total_annotated_indels)?
             }
-            WindowEntry::Dummy(region) => inject_dummy_deletion(writer, &region)?,
+            WindowEntry::Dummy(region) => inject_dummy_indels(writer, &region)?,
         }
     }
 
@@ -404,7 +406,7 @@ pub(super) fn process_and_annotate(
         total_regions,
         valid_regions: total_regions - skipped_invalid_regions,
         annotated_indels: total_annotated_indels,
-        dummy_indels: total_dummy_indels,
+        dummy_regions: total_dummy_regions,
     })
 }
 
@@ -714,7 +716,7 @@ mod tests {
         drop(writer);
 
         assert_eq!(stats.annotated_indels, 1);
-        assert_eq!(stats.dummy_indels, 0);
+        assert_eq!(stats.dummy_regions, 0);
         assert_eq!(stats.total_regions, 1);
         assert_eq!(stats.valid_regions, 1);
     }
@@ -744,7 +746,7 @@ mod tests {
         drop(writer);
 
         assert_eq!(stats.annotated_indels, 0);
-        assert_eq!(stats.dummy_indels, 1);
+        assert_eq!(stats.dummy_regions, 1);
         assert_eq!(stats.total_regions, 1);
         assert_eq!(stats.valid_regions, 1);
     }
@@ -778,7 +780,7 @@ mod tests {
 
         assert_eq!(stats.total_regions, 2);
         assert_eq!(stats.valid_regions, 1);
-        assert_eq!(stats.dummy_indels, 1);
+        assert_eq!(stats.dummy_regions, 1);
     }
 
     #[test]
@@ -806,7 +808,7 @@ mod tests {
         drop(writer);
 
         assert_eq!(stats.annotated_indels, 0);
-        assert_eq!(stats.dummy_indels, 1);
+        assert_eq!(stats.dummy_regions, 1);
     }
 
     #[test]
@@ -829,7 +831,7 @@ mod tests {
             process_and_annotate(&mut input_vcf, tmp_bed.path(), &mut writer, &aux).unwrap();
         drop(writer);
         assert_eq!(stats.annotated_indels, 0);
-        assert_eq!(stats.dummy_indels, 1);
+        assert_eq!(stats.dummy_regions, 1);
     }
 
     #[test]
@@ -968,7 +970,7 @@ mod tests {
         drop(writer);
 
         assert_eq!(stats.annotated_indels, 5);
-        assert_eq!(stats.dummy_indels, 3);
+        assert_eq!(stats.dummy_regions, 3);
 
         let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
         let entries: Vec<(u32, i64)> = reader
@@ -978,7 +980,7 @@ mod tests {
                 (rec.rid().unwrap(), rec.pos())
             })
             .collect();
-        assert_eq!(entries.len(), 11);
+        assert_eq!(entries.len(), 14);
 
         let mut sorted = entries.clone();
         sorted.sort();
@@ -1008,7 +1010,7 @@ mod tests {
         drop(writer);
 
         assert_eq!(stats.annotated_indels, 1);
-        assert_eq!(stats.dummy_indels, 1);
+        assert_eq!(stats.dummy_regions, 1);
 
         let mut reader = bcf::Reader::from_path(tmp_output.path()).unwrap();
         let record = reader

@@ -524,7 +524,11 @@ fn test_preprocess_msi_dummy_injection() -> Result<()> {
     let output = run_msi_preprocess("test_preprocess_msi_dummy")?;
     let records = bcf_utils::read_bcf_records(&output)?;
 
-    assert_eq!(records.len(), 2, "Expected SNV + dummy = 2 records");
+    assert_eq!(
+        records.len(),
+        3,
+        "Expected SNV + dummy pair (deletion+insertion) = 3 records"
+    );
 
     let dummies: Vec<_> = records
         .iter()
@@ -535,20 +539,26 @@ fn test_preprocess_msi_dummy_injection() -> Result<()> {
         .filter(|r| !bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
 
-    assert_eq!(dummies.len(), 1, "Expected exactly 1 dummy");
+    assert_eq!(dummies.len(), 2, "Expected deletion + insertion dummy pair");
     assert_eq!(non_dummies.len(), 1, "Expected exactly 1 original SNV");
 
-    assert!(
-        bcf_utils::record_has_info_string(dummies[0], MSI_REGION_ID_TAG),
-        "Dummy should have REGION_ID"
-    );
-    assert_eq!(
-        bcf_utils::get_info_strings(dummies[0], MSI_REGION_ID_TAG)
-            .and_then(|v| v.into_iter().next())
-            .unwrap(),
-        "chr1:94-124"
-    );
-    assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
+    for dummy in &dummies {
+        assert!(
+            bcf_utils::record_has_info_string(dummy, MSI_REGION_ID_TAG),
+            "Dummy should have REGION_ID"
+        );
+        assert_eq!(
+            bcf_utils::get_info_strings(dummy, MSI_REGION_ID_TAG)
+                .and_then(|v| v.into_iter().next())
+                .unwrap(),
+            "chr1:94-124"
+        );
+        assert_eq!(
+            dummy.pos(),
+            96,
+            "Dummy pos = 94 + 3 - 1 = 96 (shared by both)"
+        );
+    }
 
     assert!(
         !bcf_utils::record_has_info_string(non_dummies[0], MSI_REGION_ID_TAG),
@@ -569,8 +579,8 @@ fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
 
     assert_eq!(
         records.len(),
-        2,
-        "Expected imperfect indel + dummy = 2 records"
+        3,
+        "Expected imperfect indel + dummy pair (deletion+insertion) = 3 records"
     );
 
     let dummies: Vec<_> = records
@@ -582,20 +592,26 @@ fn test_preprocess_msi_imperfect_indel_gets_dummy() -> Result<()> {
         .filter(|r| !bcf_utils::record_has_info_flag(r, MSI_DUMMY_TAG))
         .collect();
 
-    assert_eq!(dummies.len(), 1, "Expected 1 dummy");
+    assert_eq!(dummies.len(), 2, "Expected deletion + insertion dummy pair");
     assert_eq!(non_dummies.len(), 1, "Expected 1 imperfect indel");
 
-    assert!(
-        bcf_utils::record_has_info_string(dummies[0], MSI_REGION_ID_TAG),
-        "Dummy should have REGION_ID"
-    );
-    assert_eq!(
-        bcf_utils::get_info_strings(dummies[0], MSI_REGION_ID_TAG)
-            .and_then(|v| v.into_iter().next())
-            .unwrap(),
-        "chr1:94-124"
-    );
-    assert_eq!(dummies[0].pos(), 96, "Dummy pos = 94 + 3 - 1 = 96");
+    for dummy in &dummies {
+        assert!(
+            bcf_utils::record_has_info_string(dummy, MSI_REGION_ID_TAG),
+            "Dummy should have REGION_ID"
+        );
+        assert_eq!(
+            bcf_utils::get_info_strings(dummy, MSI_REGION_ID_TAG)
+                .and_then(|v| v.into_iter().next())
+                .unwrap(),
+            "chr1:94-124"
+        );
+        assert_eq!(
+            dummy.pos(),
+            96,
+            "Dummy pos = 94 + 3 - 1 = 96 (shared by both)"
+        );
+    }
 
     assert!(
         !bcf_utils::record_has_info_string(non_dummies[0], MSI_REGION_ID_TAG),
@@ -616,8 +632,8 @@ fn test_preprocess_msi_multi_region() -> Result<()> {
 
     assert_eq!(
         records.len(),
-        2,
-        "Expected annotated variant + dummy = 2 records"
+        3,
+        "Expected annotated variant + dummy pair (deletion+insertion) = 3 records"
     );
 
     let annotated: Vec<_> = records
@@ -633,7 +649,25 @@ fn test_preprocess_msi_multi_region() -> Result<()> {
         .collect();
 
     assert_eq!(annotated.len(), 1, "Expected 1 annotated real variant");
-    assert_eq!(dummies.len(), 1, "Expected 1 dummy for second region");
+    assert_eq!(
+        dummies.len(),
+        2,
+        "Expected deletion + insertion dummy pair for second region"
+    );
+
+    for dummy in &dummies {
+        assert_eq!(
+            bcf_utils::get_info_strings(dummy, MSI_REGION_ID_TAG)
+                .and_then(|v| v.into_iter().next())
+                .unwrap(),
+            "chr1:200-230"
+        );
+        assert_eq!(
+            dummy.pos(),
+            202,
+            "Dummy pos = 200 + 3 - 1 = 202 (shared by both)"
+        );
+    }
 
     assert_eq!(
         bcf_utils::get_info_strings(annotated[0], MSI_REGION_ID_TAG)
@@ -641,13 +675,6 @@ fn test_preprocess_msi_multi_region() -> Result<()> {
             .unwrap(),
         "chr1:94-124"
     );
-    assert_eq!(
-        bcf_utils::get_info_strings(dummies[0], MSI_REGION_ID_TAG)
-            .and_then(|v| v.into_iter().next())
-            .unwrap(),
-        "chr1:200-230"
-    );
-    assert_eq!(dummies[0].pos(), 202, "Dummy pos = 200 + 3 - 1 = 202");
 
     Ok(())
 }
@@ -1020,8 +1047,10 @@ fn test_call_msi_dummy_and_real_mixed() -> Result<()> {
     })?;
 
     // Real region PROB_SOMATIC=0.9 -> p_stable=0.1
-    // Dummy region PROB_SOMATIC=0.001 -> p_stable=0.999
-    // P(k=0)=0.1*0.999=0.0999, P(k=1)=0.9*0.999+0.1*0.001=0.8992 <-wins, P(k=2)=0.9*0.001=0.0009
+    // Dummy region: 2 variants (deletion+insertion), each PROB_SOMATIC=0.001
+    //   -> p_stable = 0.999*0.999 = 0.998001
+    // P(k=0)=0.1*0.998001=0.0998, P(k=1)=0.9*0.998001+0.1*0.001999=0.8984 <-wins,
+    // P(k=2)=0.9*0.001999=0.0018
     // k_map=1, msi_score = 1/2 * 100 = 50.00
     let content = fs::read_to_string(&output)?;
     let row_af_0_0 = content

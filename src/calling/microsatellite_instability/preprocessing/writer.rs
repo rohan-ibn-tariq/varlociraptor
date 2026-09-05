@@ -4,7 +4,8 @@
 //!
 //! This module provides:
 //! 1. `VariantInWindow` - Structure for variants with accumulated region annotations
-//! 2. `inject_dummy_deletion` - Creates dummy indels for regions without perfect repeats
+//! 2. `inject_dummy_indels` - Creates dummy deletion + insertion pair for
+//!    regions without perfect repeats
 //! 3. `write_variant` - Writes variants with REGION_ID annotations if applicable
 //! 4.  Unit tests for both (2,3) functions, covering typical and edge cases
 //!
@@ -48,18 +49,22 @@ pub(super) struct VariantInWindow {
 
 /* ============ Functions ========================= */
 
-/// Inject a dummy deletion for a region with no observed perfect indels.
+/// Inject dummy indels (deletion + insertion) for a region with no observed
+/// perfect indels.
 ///
-/// Creates a hypothetical deletion of one motif unit positioned after the
-/// first repeat. Uses the last base of the first motif as anchor, avoiding
-/// the need for flanking sequence outside the region.
+/// Creates two hypothetical variants of one motif unit at the same anchored
+/// position (last base of the first repeat unit): a deletion and an
+/// insertion. Writing both lets `call variants` independently evaluate
+/// support for either direction against real reads - whichever direction
+/// has coverage (or both) contributes to the DP model; if neither does,
+/// both remain uninformative.
 ///
-/// Output record contains only REGION_ID and MSI_DUMMY INFO fields.
+/// Output records contains only REGION_ID and MSI_DUMMY INFO fields.
 /// No FORMAT or sample data is written.
 ///
 /// # Arguments
 /// * `writer` - VCF writer
-/// * `region` - BED region requiring dummy indel
+/// * `region` - BED region requiring dummy indels
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -73,17 +78,8 @@ pub(super) struct VariantInWindow {
 /// `header.rs::test_prepare_header_adds_missing_contigs`.
 ///
 /// # Example
-/// assert!(inject_dummy_deletion(&mut writer, &region).is_ok());
-pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> Result<()> {
-    let mut record = writer.empty_record();
-
-    let header = writer.header();
-
-    let rid = header.name2rid(region.chrom.as_bytes()).unwrap();
-    record.set_rid(Some(rid));
-
-    let motif_bytes = region.motif.as_bytes();
-
+/// assert!(inject_dummy_indels(&mut writer, &region).is_ok());
+pub(super) fn inject_dummy_indels(writer: &mut Writer, region: &BedRegion) -> Result<()> {
     // Guaranteed non-empty by ms_bed.rs's parse_motif_from_name.
     // Re-enable if that changes.
     // if motif_bytes.is_empty() {
@@ -93,24 +89,43 @@ pub(super) fn inject_dummy_deletion(writer: &mut Writer, region: &BedRegion) -> 
     //     .into());
     // }
 
-    let deletion_pos = region.dummy_indel_position();
-    record.set_pos(deletion_pos as i64);
-
-    let anchor = vec![motif_bytes[motif_bytes.len() - 1]];
-
-    let mut ref_allele = anchor.clone();
-    ref_allele.extend_from_slice(motif_bytes);
-
-    let alt_allele = anchor;
-
-    record.set_alleles(&[&ref_allele, &alt_allele])?;
-
+    let rid = writer.header().name2rid(region.chrom.as_bytes()).unwrap();
+    let motif_bytes = region.motif.as_bytes();
+    let dummy_pos = region.dummy_indel_position();
+    let anchor = motif_bytes[motif_bytes.len() - 1];
     let region_id = region.region_id();
-    record.push_info_string(MSI_REGION_ID_TAG, &[region_id.as_bytes()])?;
 
-    record.push_info_flag(MSI_DUMMY_TAG)?;
+    // Deletion: REF = anchor + motif, ALT = anchor
+    {
+        let mut record = writer.empty_record();
+        record.set_rid(Some(rid));
+        record.set_pos(dummy_pos as i64);
 
-    writer.write(&record)?;
+        let mut ref_allele = vec![anchor];
+        ref_allele.extend_from_slice(motif_bytes);
+        let alt_allele = vec![anchor];
+
+        record.set_alleles(&[&ref_allele, &alt_allele])?;
+        record.push_info_string(MSI_REGION_ID_TAG, &[region_id.as_bytes()])?;
+        record.push_info_flag(MSI_DUMMY_TAG)?;
+        writer.write(&record)?;
+    }
+
+    // Insertion: REF = anchor, ALT = anchor + motif
+    {
+        let mut record = writer.empty_record();
+        record.set_rid(Some(rid));
+        record.set_pos(dummy_pos as i64);
+
+        let ref_allele = vec![anchor];
+        let mut alt_allele = vec![anchor];
+        alt_allele.extend_from_slice(motif_bytes);
+
+        record.set_alleles(&[&ref_allele, &alt_allele])?;
+        record.push_info_string(MSI_REGION_ID_TAG, &[region_id.as_bytes()])?;
+        record.push_info_flag(MSI_DUMMY_TAG)?;
+        writer.write(&record)?;
+    }
 
     Ok(())
 }
@@ -201,10 +216,10 @@ mod tests {
         header
     }
 
-    /* ====== inject_dummy_deletion tests ============ */
+    /* ====== inject_dummy_indels tests ============== */
 
     #[test]
-    fn test_inject_dummy_deletion_simple_motif() {
+    fn test_inject_dummy_indels_simple_motif() {
         let tmp = NamedTempFile::new().unwrap();
         let header = create_minimal_vcf_header();
         let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
@@ -216,23 +231,42 @@ mod tests {
             motif: "CAG".to_string(),
         };
 
-        inject_dummy_deletion(&mut writer, &region).unwrap();
+        inject_dummy_indels(&mut writer, &region).unwrap();
         drop(writer);
 
         let mut reader = bcf::Reader::from_path(tmp.path()).unwrap();
-        let record = reader.records().next().unwrap().unwrap();
-        let alleles = record.alleles();
+        let records: Vec<_> = reader.records().map(|r| r.unwrap()).collect();
+        assert_eq!(records.len(), 2, "should write deletion + insertion");
 
-        assert_eq!(record.pos(), 1002, "Position: last base of 1st CAG");
-        assert_eq!(alleles[0], b"GCAG", "REF: anchor G + motif CAG");
-        assert_eq!(alleles[1], b"G", "ALT: just anchor G");
+        let del = &records[0];
+        let del_alleles = del.alleles();
+        assert_eq!(del.pos(), 1002, "Position: last base of 1st CAG");
+        assert_eq!(
+            del_alleles[0], b"GCAG",
+            "Deletion REF: anchor G + motif CAG"
+        );
+        assert_eq!(del_alleles[1], b"G", "Deletion ALT: just anchor G");
+        let del_region_id = del.info(MSI_REGION_ID_TAG).string().unwrap().unwrap();
+        assert_eq!(del_region_id[0], b"chr1:1000-1021");
 
-        let region_id = record.info(MSI_REGION_ID_TAG).string().unwrap();
-        assert_eq!(region_id.as_ref().unwrap()[0], b"chr1:1000-1021");
+        let ins = &records[1];
+        let ins_alleles = ins.alleles();
+        assert_eq!(
+            ins.pos(),
+            1002,
+            "Insertion shares the same anchor position as deletion"
+        );
+        assert_eq!(ins_alleles[0], b"G", "Insertion REF: anchor G");
+        assert_eq!(
+            ins_alleles[1], b"GCAG",
+            "Insertion ALT: anchor G + motif CAG"
+        );
+        let ins_region_id = ins.info(MSI_REGION_ID_TAG).string().unwrap().unwrap();
+        assert_eq!(ins_region_id[0], b"chr1:1000-1021");
     }
 
     #[test]
-    fn test_inject_dummy_deletion_different_motifs() {
+    fn test_inject_dummy_indels_different_motifs() {
         let tmp = NamedTempFile::new().unwrap();
         let header = create_minimal_vcf_header();
         let mut writer = Writer::from_path(tmp.path(), &header, false, bcf::Format::Vcf).unwrap();
@@ -251,29 +285,47 @@ mod tests {
                 end: *end,
                 motif: motif.to_string(),
             };
-            inject_dummy_deletion(&mut writer, &region).unwrap();
+            inject_dummy_indels(&mut writer, &region).unwrap();
         }
         drop(writer);
 
         let mut reader = bcf::Reader::from_path(tmp.path()).unwrap();
-        for (motif, _, _, expected_pos, expected_ref, expected_alt) in &cases {
-            let record = reader.records().next().unwrap().unwrap();
-            let alleles = record.alleles();
-
+        for (motif, _, _, expected_pos, expected_del_ref, expected_del_alt) in &cases {
+            let del = reader.records().next().unwrap().unwrap();
+            let del_alleles = del.alleles();
             assert_eq!(
-                record.pos(),
+                del.pos(),
                 *expected_pos as i64,
-                "Position mismatch for motif {}",
+                "Deletion position mismatch for motif {}",
                 motif
             );
             assert_eq!(
-                alleles[0], *expected_ref,
-                "REF mismatch for motif {}",
+                del_alleles[0], *expected_del_ref,
+                "Deletion REF mismatch for motif {}",
                 motif
             );
             assert_eq!(
-                alleles[1], *expected_alt,
-                "ALT mismatch for motif {}",
+                del_alleles[1], *expected_del_alt,
+                "Deletion ALT mismatch for motif {}",
+                motif
+            );
+
+            let ins = reader.records().next().unwrap().unwrap();
+            let ins_alleles = ins.alleles();
+            assert_eq!(
+                ins.pos(),
+                *expected_pos as i64,
+                "Insertion position mismatch for motif {}",
+                motif
+            );
+            assert_eq!(
+                ins_alleles[0], *expected_del_alt,
+                "Insertion REF mismatch for motif {}",
+                motif
+            );
+            assert_eq!(
+                ins_alleles[1], *expected_del_ref,
+                "Insertion ALT mismatch for motif {}",
                 motif
             );
         }
@@ -281,7 +333,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
-    fn test_inject_dummy_deletion_chromosome_not_found() {
+    fn test_inject_dummy_indels_chromosome_not_found() {
         let tmp = NamedTempFile::new().unwrap();
         let mut header = bcf::Header::new();
         header.push_record(br"##fileformat=VCFv4.2");
@@ -296,7 +348,7 @@ mod tests {
             motif: "CAG".to_string(),
         };
 
-        let _ = inject_dummy_deletion(&mut writer, &region);
+        let _ = inject_dummy_indels(&mut writer, &region);
     }
 
     /* ====== write_variant tests ==================== */

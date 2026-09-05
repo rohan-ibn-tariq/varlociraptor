@@ -125,7 +125,9 @@ pub(super) struct ExtractionStats {
     pub regions_with_real_indel: usize,
     /// Dummy indel records processed (MSI_DUMMY flag set), counted per record.
     /// Each corresponds to a region where no perfect indel was observed in reads.
-    /// Note: Each dummy has one ALT by construction.
+    /// Note: Each individual dummy record has one ALT by construction; since
+    /// inject_dummy_indels writes a deletion+insertion pair per region, a
+    /// region with no perfect indel contributes 2 to this count, not 1.
     pub dummy_records: usize,
     /// ALT Alleles skipped — FORMAT:AF absent for the sample.
     pub skipped_missing_af: usize,
@@ -150,7 +152,10 @@ impl ExtractionStats {
             "  - Regions with real indel:        {}",
             self.regions_with_real_indel
         );
-        info!("  - Regions needing a dummy indel:  {}", self.dummy_records);
+        info!(
+            "  - Regions needing a dummy indel:  {}",
+            self.dummy_records / 2
+        );
         info!(
             "  - ALT alleles skipped (no AF):    {}",
             self.skipped_missing_af
@@ -507,23 +512,43 @@ mod tests {
         let mut w =
             bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
 
-        let mut r = w.empty_record();
-        r.set_rid(Some(0));
-        r.set_pos(1002);
-        r.set_alleles(&[b"GCAG", b"G"]).unwrap();
-        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+        // Deletion half of the dummy pair
+        let mut r1 = w.empty_record();
+        r1.set_rid(Some(0));
+        r1.set_pos(1002);
+        r1.set_alleles(&[b"GCAG", b"G"]).unwrap();
+        r1.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
             .unwrap();
-        r.push_info_flag(MSI_DUMMY_TAG).unwrap();
-        r.push_info_float(b"PROB_SOMATIC", &[0.001_f32]).unwrap();
-        r.push_format_float(b"AF", &[0.0_f32]).unwrap();
-        w.write(&r).unwrap();
+        r1.push_info_flag(MSI_DUMMY_TAG).unwrap();
+        r1.push_info_float(b"PROB_SOMATIC", &[0.001_f32]).unwrap();
+        r1.push_format_float(b"AF", &[0.0_f32]).unwrap();
+        w.write(&r1).unwrap();
+
+        // Insertion half of the dummy pair (swapped REF/ALT, same position/region)
+        let mut r2 = w.empty_record();
+        r2.set_rid(Some(0));
+        r2.set_pos(1002);
+        r2.set_alleles(&[b"G", b"GCAG"]).unwrap();
+        r2.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r2.push_info_flag(MSI_DUMMY_TAG).unwrap();
+        r2.push_info_float(b"PROB_SOMATIC", &[0.001_f32]).unwrap();
+        r2.push_format_float(b"AF", &[0.0_f32]).unwrap();
+        w.write(&r2).unwrap();
+
         drop(w);
 
         let (regions, stats) = extract_somatic(&tmp);
-        assert_eq!(stats.dummy_records, 1);
+        assert_eq!(stats.dummy_records, 2);
         assert_eq!(regions.len(), 1);
         assert!(!regions[0].has_real_indel);
+        assert_eq!(
+            regions[0].variants.len(),
+            2,
+            "both dummy variants should be present"
+        );
         assert!((regions[0].variants[0].prob_absent - 0.999).abs() < TEST_EPSILON_LOOSE);
+        assert!((regions[0].variants[1].prob_absent - 0.999).abs() < TEST_EPSILON_LOOSE);
     }
 
     #[test]
