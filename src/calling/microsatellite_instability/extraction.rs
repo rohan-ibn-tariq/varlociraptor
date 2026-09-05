@@ -119,6 +119,10 @@ pub(super) struct ExtractionStats {
     pub skipped_non_ms: usize,
     /// Unique MS regions encountered — used as the MSI score denominator.
     pub total_ms_regions: usize,
+    /// Regions with at least one non-dummy indel record, counted the moment
+    /// the region is first marked real - independent of whether it later
+    /// retains any variants after AF/prob filtering or heatmap-gated pruning.
+    pub regions_with_real_indel: usize,
     /// Dummy indel records processed (MSI_DUMMY flag set), counted per record.
     /// Each corresponds to a region where no perfect indel was observed in reads.
     /// Note: Each dummy has one ALT by construction.
@@ -131,13 +135,7 @@ pub(super) struct ExtractionStats {
 
 impl ExtractionStats {
     /// Log extraction statistics alongside region-level counts.
-    ///
-    /// # Arguments
-    /// * `regions` - Extracted regions used to compute `has_real_indel` count.
-    ///   Passed separately since the count is derived post-extraction.
-    pub fn log_stats(&self, regions: &[RegionSummary]) {
-        let with_real = regions.iter().filter(|r| r.has_real_indel).count();
-
+    pub fn log_stats(&self) {
         info!("Extraction statistics:");
         info!("  - Total records read:             {}", self.total_records);
         info!(
@@ -148,7 +146,10 @@ impl ExtractionStats {
             "  - Total MS regions:               {}",
             self.total_ms_regions
         );
-        info!("  - Regions with real indel:        {}", with_real);
+        info!(
+            "  - Regions with real indel:        {}",
+            self.regions_with_real_indel
+        );
         info!("  - Regions needing a dummy indel:  {}", self.dummy_records);
         info!(
             "  - ALT alleles skipped (no AF):    {}",
@@ -176,10 +177,20 @@ impl ExtractionStats {
 /// * `sample_idx` - Index of this sample in FORMAT columns
 /// * `events`     - Event names to combine (e.g., `["somatic"]`)
 /// * `is_phred`   - Whether `INFO/PROB_*` values are PHRED-scaled
+/// * `needs_heatmap` - Whether heatmap output was requested; if `false`,
+///   regions with zero usable variants are pruned before returning, since
+///   heatmap's per-window denominator requires every region present, and
+///   window generation itself depends on every region's position - a
+///   pruned variant-less region could otherwise cause its whole window
+///   (or chromosome) to never appear on the heatmap at all.
+///   (distribution/pseudotime are unaffected either way - see
+///   filter_regions_by_af in dp_analysis.rs).
 ///
 /// # Returns
-/// `(Vec<RegionSummary>, ExtractionStats)` where Vec length equals
-/// `stats.total_ms_regions`, which is the MSI score denominator.
+/// `(Vec<RegionSummary>, ExtractionStats)`. `stats.total_ms_regions` remains
+/// the MSI score denominator regardless of pruning. Vec length equals
+/// `stats.total_ms_regions` only when `needs_heatmap` is `true`; otherwise
+/// it may be smaller, since variant-less regions are pruned.
 ///
 /// # Example
 /// assert!(extract_regions(&mut vcf, "sample1", 0, &["somatic".to_string()], true).is_ok());
@@ -189,6 +200,7 @@ pub(super) fn extract_regions(
     sample_idx: usize,
     events: &[String],
     is_phred: bool,
+    needs_heatmap: bool,
 ) -> Result<(Vec<RegionSummary>, ExtractionStats)> {
     let header: HeaderView = vcf.header().clone();
     let mut regions: Vec<RegionSummary> = Vec::new();
@@ -261,8 +273,9 @@ pub(super) fn extract_regions(
             // Mark region as having a real (non-dummy) indel for this alt if applicable.
             // This is set regardless of whether prob/AF extraction succeeds -
             // the indel structurally existed in the reads.
-            if !is_dummy {
+            if !is_dummy && !regions[region_idx].has_real_indel {
                 regions[region_idx].has_real_indel = true;
+                stats.regions_with_real_indel += 1;
             }
 
             // Combine event probabilities, P(at least one event)
@@ -307,6 +320,10 @@ pub(super) fn extract_regions(
 
     regions.sort_by(|a, b| a.chrom.cmp(&b.chrom).then(a.start.cmp(&b.start)));
 
+    if !needs_heatmap {
+        regions.retain(|r| !r.variants.is_empty());
+    }
+
     Ok((regions, stats))
 }
 
@@ -343,6 +360,7 @@ mod tests {
     fn extract_with_events(
         tmp: &NamedTempFile,
         events: &[&str],
+        needs_heatmap: bool,
     ) -> (Vec<RegionSummary>, ExtractionStats) {
         let mut vcf = bcf::Reader::from_path(tmp.path()).unwrap();
         extract_regions(
@@ -351,6 +369,7 @@ mod tests {
             0,
             &events.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
             false,
+            needs_heatmap,
         )
         .unwrap()
     }
@@ -358,7 +377,7 @@ mod tests {
     /// Run extraction with the single "somatic" event - covers the common case.
     /// Thin wrapper around [`extract_with_events`].
     fn extract_somatic(tmp: &NamedTempFile) -> (Vec<RegionSummary>, ExtractionStats) {
-        extract_with_events(tmp, &["somatic"])
+        extract_with_events(tmp, &["somatic"], true)
     }
 
     /* ====== RegionSummary::from_region_id ======= */
@@ -741,7 +760,7 @@ mod tests {
         w.write(&r).unwrap();
         drop(w);
 
-        let (regions, _) = extract_with_events(&tmp, &["somatic", "high_vaf"]);
+        let (regions, _) = extract_with_events(&tmp, &["somatic", "high_vaf"], true);
 
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].variants.len(), 1);
@@ -751,6 +770,62 @@ mod tests {
             (regions[0].variants[0].prob_absent - 0.3).abs() < TEST_EPSILON_LOOSE,
             "expected prob_absent ≈ 0.3, got {}",
             regions[0].variants[0].prob_absent
+        );
+    }
+
+    #[test]
+    fn test_variant_less_region_pruned_when_heatmap_not_needed() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+        r.push_format_float(b"AF", &[f32::missing()]).unwrap(); // missing AF -> zero variants
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_with_events(&tmp, &["somatic"], false);
+
+        assert_eq!(
+            stats.total_ms_regions, 1,
+            "denominator unaffected by pruning"
+        );
+        assert_eq!(
+            regions.len(),
+            0,
+            "variant-less region pruned when heatmap not requested"
+        );
+    }
+
+    #[test]
+    fn test_regions_with_real_indel_counted_even_when_pruned() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut w =
+            bcf::Writer::from_path(tmp.path(), &make_header(), true, bcf::Format::Vcf).unwrap();
+
+        let mut r = w.empty_record();
+        r.set_rid(Some(0));
+        r.set_pos(999);
+        r.set_alleles(&[b"GCAG", b"GCAGCAG"]).unwrap();
+        r.push_info_string(MSI_REGION_ID_TAG, &[b"chr1:1000-1030"])
+            .unwrap();
+        r.push_info_float(b"PROB_SOMATIC", &[0.9_f32]).unwrap();
+        r.push_format_float(b"AF", &[f32::missing()]).unwrap();
+        w.write(&r).unwrap();
+        drop(w);
+
+        let (regions, stats) = extract_with_events(&tmp, &["somatic"], false);
+
+        assert!(regions.is_empty(), "region was pruned");
+        assert_eq!(
+            stats.regions_with_real_indel, 1,
+            "diagnostic count survives pruning"
         );
     }
 }

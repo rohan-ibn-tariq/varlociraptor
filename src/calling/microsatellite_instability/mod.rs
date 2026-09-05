@@ -230,14 +230,22 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
 
         let sample_idx = get_sample_index(&header, &config.sample)?;
 
+        let output_req = OutputRequirements {
+            needs_pseudotime: config.plot_pseudotime.is_some() || config.data_pseudotime.is_some(),
+            needs_distribution: config.plot_distribution.is_some()
+                || config.data_distribution.is_some(),
+            needs_heatmap: config.plot_heatmap.is_some() || config.data_heatmap.is_some(),
+        };
+
         let (regions, stats) = extraction::extract_regions(
             &mut vcf,
             &config.sample,
             sample_idx,
             &config.events,
             config.is_phred,
+            output_req.needs_heatmap,
         )?;
-        stats.log_stats(&regions);
+        stats.log_stats();
 
         if stats.total_ms_regions == 0 {
             return Err(Error::MsiBedRegionsEmpty.into());
@@ -246,13 +254,6 @@ pub fn call_msi(config: MSIConfig) -> Result<()> {
         info!("----------------------------------------------");
         info!("Step 2: AF Evolution Analysis");
         info!("----------------------------------------------");
-
-        let output_req = OutputRequirements {
-            needs_pseudotime: config.plot_pseudotime.is_some() || config.data_pseudotime.is_some(),
-            needs_distribution: config.plot_distribution.is_some()
-                || config.data_distribution.is_some(),
-            needs_heatmap: config.plot_heatmap.is_some() || config.data_heatmap.is_some(),
-        };
 
         let af_thresholds: Vec<f32> = if output_req.needs_pseudotime {
             config.af_thresholds.clone()
