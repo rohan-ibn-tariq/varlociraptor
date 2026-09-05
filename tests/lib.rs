@@ -945,33 +945,6 @@ fn test_call_msi_heatmap_basic() -> Result<()> {
     Ok(())
 }
 
-// @TODO: Fix this test.
-// #[test]
-// fn test_call_msi_heatmap_empty() -> Result<()> {
-//     let basedir = basedir("test_call_msi_heatmap_empty");
-//     let data = format!("{}/heatmap_empty.tsv", basedir);
-//     let plot = format!("{}/heatmap_empty.vl.json", basedir);
-//     cleanup_file(&data);
-//     cleanup_file(&plot);
-
-//     run_msi_call(&basedir, |c| {
-//         c.data_heatmap = Some(PathBuf::from(&data));
-//         c.plot_heatmap = Some(PathBuf::from(&plot));
-//     })?;
-
-//     assert_eq!(
-//         fs::read_to_string(&data)?.lines().count(),
-//         1,
-//         "header only, no MS regions"
-//     );
-
-//     let plot_content = fs::read_to_string(&plot)?;
-//     let _plot_value: serde_json::Value = serde_json::from_str(&plot_content)?;
-//     assert!(plot_content.contains("No heatmap data"));
-
-//     Ok(())
-// }
-
 #[test]
 fn test_call_msi_all_outputs_together() -> Result<()> {
     let basedir = basedir("test_call_msi_all_outputs");
